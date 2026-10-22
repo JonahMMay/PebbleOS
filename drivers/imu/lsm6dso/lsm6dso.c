@@ -741,8 +741,11 @@ static void prv_update_int1_watchdog(void) {
     s_dev->state->last_fifo_read_tick = rtc_get_ticks();
     s_dev->state->int1_period_ms =
         (s_dev->state->sampling_interval_us * s_dev->state->num_samples) / 1000;
-    regular_timer_add_multisecond_callback(
-        &s_dev->state->int1_wdt_timer, MAX(DIVIDE_CEIL(s_dev->state->int1_period_ms, 1000UL), 1U));
+    // Poll once per stall threshold rather than per FIFO period: a check can only fire a
+    // recovery after a full threshold anyway, and each poll is its own wakeup, out of phase
+    // with the FIFO interrupt.
+    regular_timer_add_multisecond_callback(&s_dev->state->int1_wdt_timer,
+                                           DIVIDE_CEIL(prv_stall_threshold_ms(), 1000UL));
   } else if (s_dev->state->shake_detection_enabled) {
     regular_timer_add_multisecond_callback(&s_dev->state->int1_wdt_timer,
                                            LSM6DSO_SHAKE_WDT_PERIOD_S);
