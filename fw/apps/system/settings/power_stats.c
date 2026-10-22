@@ -21,6 +21,7 @@
 
 typedef struct PowerStatsBaseline {
   SocSf32lbSleepStats sleep;
+  SocSf32lbWakeStats wake;
   uint8_t charge_percent;
   bool charging;
 } PowerStatsBaseline;
@@ -30,7 +31,7 @@ typedef struct PowerStatsWindowData {
   StatusBarLayer status_layer;
   ScrollLayer scroll_layer;
   TextLayer text_layer;
-  char text[512];
+  char text[1024];
 } PowerStatsWindowData;
 
 // Kept across visits to the window, so a reset can be compared against hours later. Until the
@@ -44,14 +45,129 @@ static void prv_format_pct(char *buf, size_t size, uint64_t part, uint64_t whole
   snprintf(buf, size, "%" PRIu32 ".%02" PRIu32 "%%", pct_x100 / 100, pct_x100 % 100);
 }
 
+//! Wake causes shown, most frequent first.
+#define TOP_WAKES 6
+//! Deep sleep wake sources shown, most frequent first.
+#define TOP_SOURCES 4
+
+//! Wake causes are indexed as the tick, nothing pending, then each IRQ.
+#define WAKE_SYSTICK 0
+#define WAKE_NONE 1
+#define WAKE_IRQ0 2
+#define WAKE_CAUSES (WAKE_IRQ0 + SOC_SF32LB_WAKE_IRQS)
+
+typedef uint32_t (*PowerStatsCountFn)(const SocSf32lbWakeStats *now,
+                                      const SocSf32lbWakeStats *base, uint32_t i);
+
+static uint32_t prv_wake_count(const SocSf32lbWakeStats *now, const SocSf32lbWakeStats *base,
+                               uint32_t cause) {
+  if (cause == WAKE_SYSTICK) {
+    return now->systick - base->systick;
+  }
+  if (cause == WAKE_NONE) {
+    return now->none - base->none;
+  }
+  return now->irq[cause - WAKE_IRQ0] - base->irq[cause - WAKE_IRQ0];
+}
+
+static uint32_t prv_source_count(const SocSf32lbWakeStats *now, const SocSf32lbWakeStats *base,
+                                 uint32_t source) {
+  return now->deepsleep_source[source] - base->deepsleep_source[source];
+}
+
+//! Picks the index with the largest nonzero count that is not yet in @p picked, or -1.
+static int prv_pick_max(PowerStatsCountFn count, const SocSf32lbWakeStats *now,
+                        const SocSf32lbWakeStats *base, uint32_t n, const int *picked,
+                        int num_picked) {
+  int best = -1;
+  uint32_t best_count = 0;
+  for (uint32_t i = 0; i < n; i++) {
+    bool skip = false;
+    for (int p = 0; p < num_picked; p++) {
+      skip |= (picked[p] == (int)i);
+    }
+    const uint32_t c = count(now, base, i);
+    if (!skip && c > best_count) {
+      best = (int)i;
+      best_count = c;
+    }
+  }
+  return best;
+}
+
+//! Appends the most frequent wake causes, the deep sleep wake sources and the idle windows.
+static int prv_append_wakes(char *buf, size_t size, const SocSf32lbWakeStats *now,
+                            const SocSf32lbWakeStats *base, uint32_t seconds) {
+  int len = snprintf(buf, size, "Wakes/min\n");
+
+  int picked[TOP_WAKES];
+  int num_picked = 0;
+  while (num_picked < TOP_WAKES) {
+    const int cause = prv_pick_max(prv_wake_count, now, base, WAKE_CAUSES, picked, num_picked);
+    if (cause < 0) {
+      break;
+    }
+    picked[num_picked++] = cause;
+
+    const uint64_t c = prv_wake_count(now, base, cause);
+    const uint32_t per_min = (seconds == 0) ? 0 : (uint32_t)(c * 60 / seconds);
+    if (cause == WAKE_SYSTICK) {
+      len += snprintf(buf + len, size - len, " Tick %" PRIu32 "\n", per_min);
+    } else if (cause == WAKE_NONE) {
+      len += snprintf(buf + len, size - len, " None %" PRIu32 "\n", per_min);
+    } else {
+      const uint32_t irq = cause - WAKE_IRQ0;
+      const char *name = soc_sf32lb_irq_name(irq);
+      if (name) {
+        len += snprintf(buf + len, size - len, " %s %" PRIu32 "\n", name, per_min);
+      } else {
+        len += snprintf(buf + len, size - len, " IRQ%" PRIu32 " %" PRIu32 "\n", irq, per_min);
+      }
+    }
+  }
+
+  len += snprintf(buf + len, size - len, "Deep sleep woken by\n");
+  int sources[TOP_SOURCES];
+  int num_sources = 0;
+  while (num_sources < TOP_SOURCES) {
+    const int source = prv_pick_max(prv_source_count, now, base, SOC_SF32LB_WAKE_SOURCES,
+                                    sources, num_sources);
+    if (source < 0) {
+      break;
+    }
+    sources[num_sources++] = source;
+
+    const char *name = soc_sf32lb_wake_source_name(source);
+    const uint32_t c = prv_source_count(now, base, source);
+    if (name) {
+      len += snprintf(buf + len, size - len, " %s %" PRIu32 "\n", name, c);
+    } else {
+      len += snprintf(buf + len, size - len, " WSR%d %" PRIu32 "\n", source, c);
+    }
+  }
+
+  static const char *const s_gap_labels[SOC_SF32LB_GAP_BUCKETS] = {
+    "1", "2-4", "5-9", "10-19", "20-49", "50-199", "200+",
+  };
+  len += snprintf(buf + len, size - len, "Idle windows (ms)\n");
+  for (int i = 0; i < SOC_SF32LB_GAP_BUCKETS; i++) {
+    len += snprintf(buf + len, size - len, " %s: %" PRIu32 "\n", s_gap_labels[i],
+                    now->gap[i] - base->gap[i]);
+  }
+  return len;
+}
+
 static void prv_update_text(PowerStatsWindowData *data) {
   SocSf32lbSleepStats now;
   soc_sf32lb_sleep_stats_get(&now);
 
   const SocSf32lbSleepStats *base = &s_baseline.sleep;
+  const SocSf32lbWakeStats *wake_base = &s_baseline.wake;
   if (!s_baseline_valid) {
     static const SocSf32lbSleepStats s_boot;
+    static const SocSf32lbWakeStats s_wake_boot;
     base = &s_boot;
+    wake_base = &s_wake_boot;
   }
 
   const uint64_t total = now.total_ticks - base->total_ticks;
@@ -95,6 +211,12 @@ static void prv_update_text(PowerStatsWindowData *data) {
   len += snprintf(data->text + len, sizeof(data->text) - len, "Battery %u%% %u mV\n",
                   battery.charge_percent, battery_state_get_voltage());
 
+  // Too big for the app stack.
+  SocSf32lbWakeStats *wake = app_malloc_check(sizeof(*wake));
+  soc_sf32lb_wake_stats_get(wake);
+  len += prv_append_wakes(data->text + len, sizeof(data->text) - len, wake, wake_base, seconds);
+  app_free(wake);
+
   if (!s_baseline_valid) {
     snprintf(data->text + len, sizeof(data->text) - len, "Hold Select to start a battery run");
   } else if (battery.is_plugged || s_baseline.charging) {
@@ -128,6 +250,7 @@ static void prv_select_click_handler(ClickRecognizerRef recognizer, void *contex
 static void prv_select_long_click_handler(ClickRecognizerRef recognizer, void *context) {
   const BatteryChargeState battery = battery_get_charge_state();
   soc_sf32lb_sleep_stats_get(&s_baseline.sleep);
+  soc_sf32lb_wake_stats_get(&s_baseline.wake);
   s_baseline.charge_percent = battery.charge_percent;
   s_baseline.charging = battery.is_plugged;
   s_baseline_valid = true;

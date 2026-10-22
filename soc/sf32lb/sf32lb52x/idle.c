@@ -56,6 +56,12 @@ static uint32_t s_wfi_count;
 static uint32_t s_deepwfi_count;
 static uint32_t s_deepsleep_count;
 
+// What ended each sleep and how long the idle windows were, since boot.
+static SocSf32lbWakeStats s_wake_stats;
+
+_Static_assert(SOC_SF32LB_WAKE_IRQS == CONFIG_NUM_IRQS, "wake stats must cover every IRQ");
+#define NVIC_WORDS ((SOC_SF32LB_WAKE_IRQS + 31) / 32)
+
 //! Early wake-up ticks (to avoid over-sleeping due to wake-up latency)
 static const uint32_t EARLY_WAKEUP_TICKS = 4;
 //! Minimum ticks to enter deep sleep
@@ -84,10 +90,52 @@ static void prv_restore_iser(void) {
   }
 }
 
+//! Counts what ended a sleep. Runs with interrupts masked, so whatever woke the CPU is still
+//! pending; @p enabled is the NVIC enable mask that was in effect while asleep.
+PBL_SECTION_RAM static void prv_count_wake(const volatile uint32_t *enabled, bool check_systick) {
+  bool found = false;
+
+  if (check_systick && (SCB->ICSR & SCB_ICSR_PENDSTSET_Msk)) {
+    s_wake_stats.systick++;
+    found = true;
+  }
+
+  for (uint32_t w = 0; w < NVIC_WORDS; w++) {
+    uint32_t pending = NVIC->ISPR[w] & enabled[w];
+    while (pending) {
+      const uint32_t irq = w * 32 + __builtin_ctz(pending);
+      pending &= pending - 1;
+      if (irq < SOC_SF32LB_WAKE_IRQS) {
+        s_wake_stats.irq[irq]++;
+        found = true;
+      }
+    }
+  }
+
+  if (!found) {
+    s_wake_stats.none++;
+  }
+}
+
+//! Counts an idle window by length, to show how many a lower deep sleep threshold would catch.
+PBL_SECTION_RAM static void prv_count_gap(pbl_tick_t max_ticks) {
+  // Upper bounds in ticks, compared directly so this stays clear of library division.
+  static const pbl_tick_t bounds[SOC_SF32LB_GAP_BUCKETS - 1] = {
+    RTC_TICKS_HZ * 2 / 1000,  RTC_TICKS_HZ * 5 / 1000,  RTC_TICKS_HZ * 10 / 1000,
+    RTC_TICKS_HZ * 20 / 1000, RTC_TICKS_HZ * 50 / 1000, RTC_TICKS_HZ * 200 / 1000,
+  };
+  uint32_t bucket = 0;
+  while (bucket < SOC_SF32LB_GAP_BUCKETS - 1 && max_ticks >= bounds[bucket]) {
+    bucket++;
+  }
+  s_wake_stats.gap[bucket]++;
+}
+
 static inline void prv_enter_wfi(void) {
   s_last_sleep_type = SleepTypeWfi;
   s_wfi_count++;
   __WFI();
+  prv_count_wake(NVIC->ISER, true);
 }
 
 static void prv_enter_deepwfi(void) {
@@ -102,6 +150,7 @@ static void prv_enter_deepwfi(void) {
   SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
   __WFI();
   SCB->SCR &= ~SCB_SCR_SLEEPDEEP_Msk;
+  prv_count_wake(NVIC->ISER, true);
 }
 
 PBL_SECTION_RAM static void prv_enter_deepslep(void) {
@@ -145,6 +194,15 @@ PBL_SECTION_RAM static void prv_enter_deepslep(void) {
   __NOP();
   __NOP();
   __NOP();
+
+  // The AON interrupt is only enabled to wake us, so count against the mask from before sleep,
+  // and record which wake sources fired before the AON handler clears them.
+  uint32_t wsr = HAL_HPAON_GET_WSR();
+  while (wsr) {
+    s_wake_stats.deepsleep_source[__builtin_ctz(wsr)]++;
+    wsr &= wsr - 1;
+  }
+  prv_count_wake(s_iser_bak, false);
 
   HAL_HPAON_ENABLE_PAD();
   HAL_HPAON_ENABLE_VHP();
@@ -201,6 +259,8 @@ PBL_SECTION_RAM void pbl_soc_idle(pbl_tick_t max_ticks) {
 
   if (pbl_idle_confirm()) {
     SocSf32lbSleepLevel max_level = soc_sf32lb_sleep_max_level();
+
+    prv_count_gap(max_ticks);
 
     // Deep sleep needs a minimum idle window.
     if (max_ticks < MIN_DEEPSLEEP_TICKS) {
@@ -412,6 +472,120 @@ void soc_sf32lb_sleep_stats_get(SocSf32lbSleepStats *stats) {
     .ipc_not_idle_count = s_total_ipc_not_idle_count + s_analytics_ipc_not_idle_count,
   };
   pbl_irq_unlock();
+}
+
+void soc_sf32lb_wake_stats_get(SocSf32lbWakeStats *stats) {
+  pbl_irq_lock();
+  *stats = s_wake_stats;
+  pbl_irq_unlock();
+}
+
+const char *soc_sf32lb_irq_name(uint32_t irq) {
+  switch (irq) {
+    case AON_IRQn:
+      return "AON";
+    case LPTIM1_IRQn:
+      return "LPTIM1";
+    case LPTIM2_IRQn:
+      return "LPTIM2";
+    case LPTIM3_IRQn:
+      return "LPTIM3";
+    case PMUC_IRQn:
+      return "PMUC";
+    case RTC_IRQn:
+      return "RTC";
+    case LCPU2HCPU_IRQn:
+      return "LCPU IPC";
+    case GPIO1_IRQn:
+      return "GPIO1";
+    case GPIO2_IRQn:
+      return "GPIO2";
+    case USART1_IRQn:
+      return "USART1";
+    case USART2_IRQn:
+      return "USART2";
+    case USART3_IRQn:
+      return "USART3";
+    case SPI1_IRQn:
+      return "SPI1";
+    case SPI2_IRQn:
+      return "SPI2";
+    case I2C1_IRQn:
+      return "I2C1";
+    case I2C2_IRQn:
+      return "I2C2";
+    case I2C3_IRQn:
+      return "I2C3";
+    case I2C4_IRQn:
+      return "I2C4";
+    case LCDC1_IRQn:
+      return "LCDC1";
+    case EPIC_IRQn:
+      return "EPIC";
+    case EXTDMA_IRQn:
+      return "EXTDMA";
+    case GPADC_IRQn:
+      return "GPADC";
+    case MPI1_IRQn:
+      return "MPI1";
+    case MPI2_IRQn:
+      return "MPI2";
+    case GPTIM1_IRQn:
+      return "GPTIM1";
+    case GPTIM2_IRQn:
+      return "GPTIM2";
+    case BTIM1_IRQn:
+      return "BTIM1";
+    case BTIM2_IRQn:
+      return "BTIM2";
+    case ATIM1_IRQn:
+      return "ATIM1";
+    case PDM1_IRQn:
+      return "PDM1";
+    case I2S1_IRQn:
+      return "I2S1";
+    case AUDPRC_IRQn:
+      return "AUDPRC";
+    case AUD_HP_IRQn:
+      return "AUD_HP";
+    case USBC_IRQn:
+      return "USBC";
+    case TSEN_IRQn:
+      return "TSEN";
+    default:
+      if (irq >= DMAC1_CH1_IRQn && irq <= DMAC1_CH8_IRQn) {
+        return "DMAC1";
+      }
+      return NULL;
+  }
+}
+
+const char *soc_sf32lb_wake_source_name(uint32_t source) {
+  switch (source) {
+    case HPSYS_AON_WSR_RTC_Pos:
+      return "RTC";
+    case HPSYS_AON_WSR_GPIO1_Pos:
+      return "GPIO1";
+    case HPSYS_AON_WSR_LPTIM1_Pos:
+      return "LPTIM1";
+    case HPSYS_AON_WSR_PMUC_Pos:
+      return "PMUC";
+    case HPSYS_AON_WSR_LP2HP_REQ_Pos:
+      return "LCPU req";
+    case HPSYS_AON_WSR_LP2HP_IRQ_Pos:
+      return "LCPU irq";
+    default: {
+      static const char *const pins[] = {
+        "PIN0",  "PIN1",  "PIN2",  "PIN3",  "PIN4",  "PIN5",  "PIN6",
+        "PIN7",  "PIN8",  "PIN9",  "PIN10", "PIN11", "PIN12", "PIN13",
+        "PIN14", "PIN15", "PIN16", "PIN17", "PIN18", "PIN19", "PIN20",
+      };
+      if (source >= HPSYS_AON_WSR_PIN0_Pos && source <= HPSYS_AON_WSR_PIN20_Pos) {
+        return pins[source - HPSYS_AON_WSR_PIN0_Pos];
+      }
+      return NULL;
+    }
+  }
 }
 
 #ifdef CONFIG_SHELL
