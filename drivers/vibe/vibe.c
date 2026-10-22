@@ -96,3 +96,21 @@ int pbl_vibe_set_calibration(const struct pbl_vibe *vibe, uint8_t cali) {
 
   return ret;
 }
+
+int pbl_vibe_suspend(const struct pbl_vibe *vibe) {
+  int ret;
+
+  if (!pbl_device_is_ready(&vibe->dev)) {
+    return -ENODEV;
+  }
+
+  if (vibe->ops->suspend == nullptr) {
+    return -ENOTSUP;
+  }
+
+  prv_lock(vibe);
+  ret = vibe->ops->suspend(vibe);
+  prv_unlock(vibe);
+
+  return ret;
+}

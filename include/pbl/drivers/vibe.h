@@ -48,6 +48,8 @@ struct pbl_vibe_ops {
   int (*calibrate)(const struct pbl_vibe *vibe, uint8_t *cali);
   /** Optional. Apply a value set by calibrate. */
   int (*set_calibration)(const struct pbl_vibe *vibe, uint8_t cali);
+  /** Optional. Stop the motor and power the part down; the next operation powers it back up. */
+  int (*suspend)(const struct pbl_vibe *vibe);
 };
 
 /** @brief Vibration motor runtime state. */
@@ -150,5 +152,16 @@ int pbl_vibe_calibrate(const struct pbl_vibe *vibe, uint8_t *cali);
  *         negative errno.
  */
 int pbl_vibe_set_calibration(const struct pbl_vibe *vibe, uint8_t cali);
+
+/**
+ * @brief Stop the motor and power the driver down until it is next used.
+ *
+ * The next start or calibration call powers it back up first, which delays it slightly.
+ *
+ * @param vibe Vibration motor.
+ * @return 0, -ENOTSUP if the driver cannot power down, -ENODEV if the motor is not ready, or a
+ *         negative errno.
+ */
+int pbl_vibe_suspend(const struct pbl_vibe *vibe);
 
 /** @} */
