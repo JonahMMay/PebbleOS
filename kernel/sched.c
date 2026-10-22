@@ -126,6 +126,7 @@ static void prv_expire_timeouts(void) {
       t->backend.waitq = nullptr;
     }
     t->backend.wake_rc = -EAGAIN;
+    t->backend.timeout_wakes++;
     prv_ready_push(t);
   }
 }

@@ -146,6 +146,8 @@ struct pbl_thread_stats {
   uint32_t number;
   /** Time spent running, in ticks. */
   uint32_t run_time;
+  /** Times a timeout, rather than an event, made the thread ready. */
+  uint32_t timeout_wakes;
   /** Bytes of stack never used, see @ref pbl_thread_stack_info::high_water. */
   size_t stack_high_water;
   /** State at the time of the snapshot. */
