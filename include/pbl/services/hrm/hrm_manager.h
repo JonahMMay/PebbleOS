@@ -104,8 +104,8 @@ typedef enum {
 
 /** @brief Accelerometer sampling rate provided to the HRM driver, in mHz (25 Hz). */
 #define HRM_MANAGER_ACCEL_RATE_MILLIHZ (25000)
-/** @brief Accelerometer samples buffered for the driver: 2 s, in case a handshake is missed. */
-#define HRM_MANAGER_MAX_ACCEL_SAMPLES ((2 * HRM_MANAGER_ACCEL_RATE_MILLIHZ) / 1000)
+/** @brief Accelerometer samples buffered for the driver: 4 s, above the slowest FIFO drain. */
+#define HRM_MANAGER_MAX_ACCEL_SAMPLES ((4 * HRM_MANAGER_ACCEL_RATE_MILLIHZ) / 1000)
 
 /** @brief Expiration given to the subscription of an app that exits, in seconds. */
 #define HRM_MANAGER_APP_EXIT_EXPIRATION_SEC PBL_SEC_PER_HOUR
