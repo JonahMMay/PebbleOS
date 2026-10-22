@@ -86,6 +86,16 @@ void vibes_set_default_vibe_strength(int32_t vibe_strength_default);
 void vibe_service_set_enabled(bool enable);
 
 /**
+ * @brief Runlevel hook.
+ *
+ * When not kept powered, the motor driver is powered down between patterns, at the cost of a
+ * short delay at the start of each one. It is always powered down while disabled.
+ *
+ * @param keep_powered True to keep the motor driver powered between patterns.
+ */
+void vibe_service_set_keep_powered(bool keep_powered);
+
+/**
  * @brief Set the owner of the next pattern.
  *
  * Consumed when the first step of the next pattern is queued. Without it, patterns from the app
