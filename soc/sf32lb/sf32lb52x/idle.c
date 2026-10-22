@@ -46,6 +46,16 @@ static RtcTicks s_last_ticks;
 static uint32_t s_analytics_ipc_not_idle_count;
 static bool s_force_wfi;
 
+// Since-boot totals for the power stats screen. The analytics counters above are folded in at
+// each heartbeat, before they are reset; the entry counts are never reset.
+static RtcTicks s_total_wfi_ticks;
+static RtcTicks s_total_deepwfi_ticks;
+static RtcTicks s_total_deepsleep_ticks;
+static uint32_t s_total_ipc_not_idle_count;
+static uint32_t s_wfi_count;
+static uint32_t s_deepwfi_count;
+static uint32_t s_deepsleep_count;
+
 //! Early wake-up ticks (to avoid over-sleeping due to wake-up latency)
 static const uint32_t EARLY_WAKEUP_TICKS = 4;
 //! Minimum ticks to enter deep sleep
@@ -76,11 +86,13 @@ static void prv_restore_iser(void) {
 
 static inline void prv_enter_wfi(void) {
   s_last_sleep_type = SleepTypeWfi;
+  s_wfi_count++;
   __WFI();
 }
 
 static void prv_enter_deepwfi(void) {
   s_last_sleep_type = SleepTypeDeepWfi;
+  s_deepwfi_count++;
 
   flash_power_down_for_stop_mode();
 
@@ -98,6 +110,8 @@ PBL_SECTION_RAM static void prv_enter_deepslep(void) {
   int clk_src;
 
   flash_state = QSPI_FLASH->qspi->state;
+
+  s_deepsleep_count++;
 
   prv_save_iser();
 
@@ -368,10 +382,36 @@ void pbl_analytics_external_collect_cpu_stats(void) {
   PBL_ANALYTICS_SET_UNSIGNED(sifli_ipc_not_idle_count, s_analytics_ipc_not_idle_count);
 
   s_last_ticks = now_ticks;
+
+  // Fold into the since-boot totals and reset in one go, so soc_sf32lb_sleep_stats_get() never
+  // sees a tick counted twice or not at all.
+  pbl_irq_lock();
+  s_total_wfi_ticks += s_analytics_wfi_ticks;
+  s_total_deepwfi_ticks += s_analytics_deepwfi_ticks;
+  s_total_deepsleep_ticks += s_analytics_deepsleep_ticks;
+  s_total_ipc_not_idle_count += s_analytics_ipc_not_idle_count;
   s_analytics_wfi_ticks = 0;
   s_analytics_deepwfi_ticks = 0;
   s_analytics_deepsleep_ticks = 0;
   s_analytics_ipc_not_idle_count = 0;
+  pbl_irq_unlock();
+}
+
+void soc_sf32lb_sleep_stats_get(SocSf32lbSleepStats *stats) {
+  const RtcTicks now_ticks = rtc_get_ticks();
+
+  pbl_irq_lock();
+  *stats = (SocSf32lbSleepStats){
+    .total_ticks = now_ticks,
+    .wfi_ticks = s_total_wfi_ticks + s_analytics_wfi_ticks,
+    .deepwfi_ticks = s_total_deepwfi_ticks + s_analytics_deepwfi_ticks,
+    .deepsleep_ticks = s_total_deepsleep_ticks + s_analytics_deepsleep_ticks,
+    .wfi_count = s_wfi_count,
+    .deepwfi_count = s_deepwfi_count,
+    .deepsleep_count = s_deepsleep_count,
+    .ipc_not_idle_count = s_total_ipc_not_idle_count + s_analytics_ipc_not_idle_count,
+  };
+  pbl_irq_unlock();
 }
 
 #ifdef CONFIG_SHELL
