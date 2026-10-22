@@ -587,6 +587,27 @@ static bool prv_trim_in_range(uint8_t trim) {
          (offset_hz <= (int)CONFIG_VIBE_AW86225_LRA_FREQUENCY_TOLERANCE_HZ);
 }
 
+//! Load the state that a reset clears: the waveform RAM and the calibration trim.
+static int prv_configure(const struct pbl_aw86225 *dev) {
+  int ret;
+
+  ret = prv_load_ram_image(dev);
+  if (ret != 0) {
+    PBL_LOG_ERR("Could not load the waveform (%d)", ret);
+    return ret;
+  }
+
+  if (dev->state->trim_valid) {
+    ret = prv_set_trim(dev, dev->state->trim_lra);
+    if (ret != 0) {
+      PBL_LOG_ERR("Could not apply the calibration (%d)", ret);
+      return ret;
+    }
+  }
+
+  return 0;
+}
+
 static int prv_init(const struct pbl_vibe *vibe) {
   const struct pbl_aw86225 *dev = prv_get(vibe);
   uint8_t chip_id;
@@ -607,19 +628,41 @@ static int prv_init(const struct pbl_vibe *vibe) {
     return -ENODEV;
   }
 
-  ret = prv_load_ram_image(dev);
+  return prv_configure(dev);
+}
+
+//! Bring a suspended chip out of reset and restore the configuration reset cleared.
+static int prv_resume(const struct pbl_aw86225 *dev) {
+  int ret;
+
+  if (!dev->state->suspended) {
+    return 0;
+  }
+
+  (void)pbl_gpio_set(&dev->reset, false);
+  pbl_sleep_ms(AW862XX_PWR_ON_TIME);
+
+  ret = prv_configure(dev);
   if (ret != 0) {
-    PBL_LOG_ERR("Could not load the waveform (%d)", ret);
     return ret;
   }
 
-  if (dev->state->trim_valid) {
-    ret = prv_set_trim(dev, dev->state->trim_lra);
-    if (ret != 0) {
-      PBL_LOG_ERR("Could not apply the calibration (%d)", ret);
-      return ret;
-    }
+  dev->state->suspended = false;
+
+  return 0;
+}
+
+static int prv_suspend(const struct pbl_vibe *vibe) {
+  const struct pbl_aw86225 *dev = prv_get(vibe);
+
+  if (dev->state->suspended) {
+    return 0;
   }
+
+  // Reset stops any playback and leaves the chip at its shutdown current.
+  (void)pbl_gpio_set(&dev->reset, true);
+  dev->state->playing = false;
+  dev->state->suspended = true;
 
   return 0;
 }
@@ -627,6 +670,12 @@ static int prv_init(const struct pbl_vibe *vibe) {
 static int prv_start(const struct pbl_vibe *vibe, int8_t strength) {
   const struct pbl_aw86225 *dev = prv_get(vibe);
   int ret;
+
+  ret = prv_resume(dev);
+  if (ret != 0) {
+    PBL_LOG_ERR("Could not resume (%d)", ret);
+    return ret;
+  }
 
   if (strength < 0) {
     strength = -strength;
@@ -668,6 +717,11 @@ static int prv_stop(const struct pbl_vibe *vibe) {
   const struct pbl_aw86225 *dev = prv_get(vibe);
   int ret;
 
+  if (dev->state->suspended) {
+    // Held in reset: already stopped.
+    return 0;
+  }
+
   ret = prv_stop_playback(dev);
   if (ret != 0) {
     PBL_LOG_ERR("Could not confirm the playback stop (%d)", ret);
@@ -688,6 +742,11 @@ static int prv_calibrate(const struct pbl_vibe *vibe, uint8_t *cali) {
   int f0 = 0;
   int step;
   int ret;
+
+  ret = prv_resume(dev);
+  if (ret != 0) {
+    return ret;
+  }
 
   // Measure F0 with a neutral trim
   ret = prv_set_trim(dev, 0U);
@@ -744,6 +803,11 @@ static int prv_set_calibration(const struct pbl_vibe *vibe, uint8_t cali) {
     return -EINVAL;
   }
 
+  ret = prv_resume(dev);
+  if (ret != 0) {
+    return ret;
+  }
+
   ret = prv_set_trim(dev, trim);
   if (ret != 0) {
     PBL_LOG_ERR("Could not apply the calibration (%d)", ret);
@@ -763,4 +827,5 @@ const struct pbl_vibe_ops pbl_aw86225_ops = {
   .stop = prv_stop,
   .calibrate = prv_calibrate,
   .set_calibration = prv_set_calibration,
+  .suspend = prv_suspend,
 };

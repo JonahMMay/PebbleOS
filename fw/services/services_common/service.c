@@ -73,6 +73,8 @@ static struct ServiceRunLevelSetting s_runlevel_settings[] = {
   },
   {.set_enable_fn = vibe_service_set_enabled,
    .enable_mask = R_LowPower | R_FirmwareUpdate | R_Normal},
+  // Low power mode rarely vibrates (alarms): power the driver only for each pattern.
+  {.set_enable_fn = vibe_service_set_keep_powered, .enable_mask = R_FirmwareUpdate | R_Normal},
   {
     .set_enable_fn = bt_ctl_set_enabled,
     .enable_mask = R_FirmwareUpdate | R_Normal,

@@ -75,6 +75,10 @@ int pbl_vibe_stop(const struct pbl_vibe *vibe) {
   return 0;
 }
 
+int pbl_vibe_suspend(const struct pbl_vibe *vibe) {
+  return 0;
+}
+
 const struct pbl_accel *const ACCEL = nullptr;
 
 uint32_t pbl_accel_get_max_num_samples(const struct pbl_accel *accel) {
