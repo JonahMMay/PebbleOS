@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 #include <pbl/drivers/rtc.h>
+#include <pbl/kernel/debug.h>
 #include <pbl/services/battery/battery_state.h>
 #include <pbl/services/i18n/i18n.h>
 #include <pbl/soc/sf32lb/sleep.h>
@@ -18,10 +19,16 @@
 #include <applib/ui/option_menu_window.h>
 #include <applib/ui/ui.h>
 #include <kernel/pbl_malloc.h>
+#include <kernel/task_timer_manager.h>
 
 typedef struct PowerStatsBaseline {
   SocSf32lbSleepStats sleep;
   SocSf32lbWakeStats wake;
+  //! Timeout wakes of each thread, by thread number.
+  uint32_t thread_number[CONFIG_KERNEL_MAX_THREADS];
+  uint32_t thread_wakes[CONFIG_KERNEL_MAX_THREADS];
+  size_t thread_count;
+  TaskTimerCbStat timers[TASK_TIMER_CB_STATS];
   uint8_t charge_percent;
   bool charging;
 } PowerStatsBaseline;
@@ -31,7 +38,7 @@ typedef struct PowerStatsWindowData {
   StatusBarLayer status_layer;
   ScrollLayer scroll_layer;
   TextLayer text_layer;
-  char text[1024];
+  char text[2048];
 } PowerStatsWindowData;
 
 // Kept across visits to the window, so a reset can be compared against hours later. Until the
@@ -157,6 +164,110 @@ static int prv_append_wakes(char *buf, size_t size, const SocSf32lbWakeStats *no
   return len;
 }
 
+//! Rows shown for the threads woken by timeouts and for the timer callbacks.
+#define TIMER_ROWS 7
+
+static uint32_t prv_thread_base(const struct pbl_thread_stats *t) {
+  if (!s_baseline_valid) {
+    return 0;
+  }
+  for (size_t i = 0; i < s_baseline.thread_count; i++) {
+    if (s_baseline.thread_number[i] == t->number) {
+      return s_baseline.thread_wakes[i];
+    }
+  }
+  return 0;
+}
+
+static uint32_t prv_timer_base(const TaskTimerCbStat *t) {
+  if (!s_baseline_valid) {
+    return 0;
+  }
+  for (size_t i = 0; i < TASK_TIMER_CB_STATS; i++) {
+    if (s_baseline.timers[i].count != 0 && s_baseline.timers[i].cb == t->cb) {
+      return s_baseline.timers[i].count;
+    }
+  }
+  return 0;
+}
+
+static void prv_baseline_threads_and_timers(void) {
+  struct pbl_thread_stats *threads =
+      app_malloc_check(sizeof(*threads) * CONFIG_KERNEL_MAX_THREADS);
+  const size_t count = pbl_thread_stats_snapshot(threads, CONFIG_KERNEL_MAX_THREADS, nullptr);
+  for (size_t i = 0; i < count; i++) {
+    s_baseline.thread_number[i] = threads[i].number;
+    s_baseline.thread_wakes[i] = threads[i].timeout_wakes;
+  }
+  s_baseline.thread_count = count;
+  app_free(threads);
+  task_timer_cb_stats_get(s_baseline.timers);
+}
+
+//! Appends the threads most often woken by a timeout, which is what the deep sleep timer wakes
+//! up for, and the timer callbacks run most often.
+static int prv_append_timers(char *buf, size_t size, uint32_t seconds) {
+  if (seconds == 0) {
+    return 0;
+  }
+
+  struct pbl_thread_stats *threads =
+      app_malloc_check(sizeof(*threads) * CONFIG_KERNEL_MAX_THREADS);
+  const size_t count = pbl_thread_stats_snapshot(threads, CONFIG_KERNEL_MAX_THREADS, nullptr);
+  uint32_t deltas[CONFIG_KERNEL_MAX_THREADS];
+  for (size_t i = 0; i < count; i++) {
+    deltas[i] = threads[i].timeout_wakes - prv_thread_base(&threads[i]);
+  }
+
+  int len = snprintf(buf, size, "Timeout wakes/min\n");
+  for (int row = 0; row < TIMER_ROWS; row++) {
+    size_t best = count;
+    for (size_t i = 0; i < count; i++) {
+      if (deltas[i] != 0 && (best == count || deltas[i] > deltas[best])) {
+        best = i;
+      }
+    }
+    if (best == count) {
+      break;
+    }
+    len += snprintf(buf + len, size - len, " %s %" PRIu32 "\n", threads[best].name,
+                    (uint32_t)((uint64_t)deltas[best] * 60 / seconds));
+    deltas[best] = 0;
+  }
+  app_free(threads);
+
+  TaskTimerCbStat *timers = app_malloc_check(sizeof(*timers) * TASK_TIMER_CB_STATS);
+  task_timer_cb_stats_get(timers);
+  for (size_t i = 0; i < TASK_TIMER_CB_STATS; i++) {
+    timers[i].count -= prv_timer_base(&timers[i]);
+  }
+
+  len += snprintf(buf + len, size - len, "Timer callbacks/min\n");
+  for (int row = 0; row < TIMER_ROWS; row++) {
+    size_t best = TASK_TIMER_CB_STATS;
+    for (size_t i = 0; i < TASK_TIMER_CB_STATS; i++) {
+      if (timers[i].count != 0 &&
+          (best == TASK_TIMER_CB_STATS || timers[i].count > timers[best].count)) {
+        best = i;
+      }
+    }
+    if (best == TASK_TIMER_CB_STATS) {
+      break;
+    }
+    const uint32_t per_min = (uint32_t)((uint64_t)timers[best].count * 60 / seconds);
+    if (timers[best].cb == nullptr) {
+      len += snprintf(buf + len, size - len, " Others %" PRIu32 "\n", per_min);
+    } else {
+      len += snprintf(buf + len, size - len, " %08" PRIx32 " %" PRIu32 "\n",
+                      (uint32_t)(uintptr_t)timers[best].cb, per_min);
+    }
+    timers[best].count = 0;
+  }
+  app_free(timers);
+
+  return len;
+}
+
 static void prv_update_text(PowerStatsWindowData *data) {
   SocSf32lbSleepStats now;
   soc_sf32lb_sleep_stats_get(&now);
@@ -216,6 +327,7 @@ static void prv_update_text(PowerStatsWindowData *data) {
   soc_sf32lb_wake_stats_get(wake);
   len += prv_append_wakes(data->text + len, sizeof(data->text) - len, wake, wake_base, seconds);
   app_free(wake);
+  len += prv_append_timers(data->text + len, sizeof(data->text) - len, seconds);
 
   if (!s_baseline_valid) {
     snprintf(data->text + len, sizeof(data->text) - len, "Hold Select to start a battery run");
@@ -251,6 +363,7 @@ static void prv_select_long_click_handler(ClickRecognizerRef recognizer, void *c
   const BatteryChargeState battery = battery_get_charge_state();
   soc_sf32lb_sleep_stats_get(&s_baseline.sleep);
   soc_sf32lb_wake_stats_get(&s_baseline.wake);
+  prv_baseline_threads_and_timers();
   s_baseline.charge_percent = battery.charge_percent;
   s_baseline.charging = battery.is_plugged;
   s_baseline_valid = true;

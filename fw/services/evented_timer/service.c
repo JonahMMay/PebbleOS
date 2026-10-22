@@ -10,6 +10,7 @@
 #include <pbl/services/new_timer/new_timer.h>
 
 #include <kernel/events.h>
+#include <kernel/task_timer_manager.h>
 #include <kernel/pbl_malloc.h>
 #include <kernel/pebble_tasks.h>
 #include <process_management/app_manager.h>
@@ -146,6 +147,7 @@ static void prv_sys_timer_callback(void *cb_data) {
   }
 
   timer->expired = !timer->repeating;
+  task_timer_cb_stats_record((void *)timer->callback);
 
   pbl_mutex_unlock(&s_mutex);
 

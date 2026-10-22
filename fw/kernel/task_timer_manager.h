@@ -28,6 +28,24 @@ typedef struct TaskTimerManager {
   void *current_cb;
 } TaskTimerManager;
 
+//! Number of distinct callbacks task_timer_cb_stats_get() reports.
+#define TASK_TIMER_CB_STATS 32
+
+//! How many times a timer callback ran.
+typedef struct TaskTimerCbStat {
+  //! The callback, or NULL for the ones that did not fit.
+  void *cb;
+  uint32_t count;
+} TaskTimerCbStat;
+
+//! Count one run of @p cb. Also called by services that dispatch timers of their own, with the
+//! callback they dispatch to.
+void task_timer_cb_stats_record(void *cb);
+
+//! Copy the callback counts since boot. Callbacks seen after the table filled up are counted
+//! together in the last entry.
+void task_timer_cb_stats_get(TaskTimerCbStat stats[TASK_TIMER_CB_STATS]);
+
 //! Initialize a passed in manager object.
 //! @param[in] manager The manager object to initialize
 //! @param[in] semaphore a semaphore the TaskTimerManager should give if the next expiring timer
