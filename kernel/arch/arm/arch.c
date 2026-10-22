@@ -429,8 +429,9 @@ void SysTick_Handler(void) {
 #endif
 
 void arch_idle(pbl_tick_t max_ticks) {
-  // Short gaps are not worth the sleep entry; the idle loop just comes back.
-  if (max_ticks >= 2) {
+  // Even a one-tick gap is worth a WFI: the tick interrupt wakes the core, which would otherwise
+  // spin at full clock until the timeout. Only a timeout due now skips it.
+  if (max_ticks >= 1) {
     pbl_soc_idle(max_ticks);
   }
 }
