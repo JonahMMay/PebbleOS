@@ -269,6 +269,19 @@ int pbl_i2c_write_register_block(const struct pbl_i2c_dev *dev, uint8_t reg, uin
 int pbl_i2c_read_block(const struct pbl_i2c_dev *dev, uint32_t size, uint8_t *result);
 
 /**
+ * @brief Read data without sending a register address, into a buffer the controller may fill
+ * through DMA.
+ *
+ * Like pbl_i2c_read_block(), with the buffer rules of pbl_i2c_read_register_block_dma().
+ *
+ * @param dev Device.
+ * @param size Number of bytes to read.
+ * @param[out] result Destination buffer, see pbl_i2c_read_register_block_dma().
+ * @return 0 on success, or a negative errno.
+ */
+int pbl_i2c_read_block_dma(const struct pbl_i2c_dev *dev, uint32_t size, uint8_t *result);
+
+/**
  * @brief Write data without sending a register address.
  *
  * @param dev Device.
