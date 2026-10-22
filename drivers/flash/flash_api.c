@@ -159,6 +159,8 @@ void flash_write_bytes(const uint8_t *buffer, uint32_t start_addr, uint32_t buff
   pbl_mutex_unlock(&s_flash_lock);
 }
 
+static uint32_t prv_flash_erase_poll(void);
+
 // Returns 0 if the erase has completed, or a non-zero expected duration (in
 // ms) if not. If the erase has not finished (non-zero has been returned), the
 // caller is responsible for calling the prv_flash_erase_poll() method until
@@ -201,7 +203,13 @@ static uint32_t prv_flash_erase_start(uint32_t addr, FlashOperationCompleteCb on
       is_subsector ? flash_impl_erase_subsector_begin(addr) : flash_impl_erase_sector_begin(addr);
 
   if (PASSED(status)) {
+    // Some drivers erase synchronously, so the erase may already be over. Check before making the
+    // caller wait out most of the typical erase time for nothing.
+    status = flash_impl_get_erase_status();
     pbl_mutex_unlock(&s_flash_lock);
+    if (status != E_BUSY && status != E_AGAIN) {
+      return prv_flash_erase_poll();
+    }
     return MAX(s_erase.expected_duration * 7 / 8, 1U);
   } else {
     s_erase.in_progress = false;

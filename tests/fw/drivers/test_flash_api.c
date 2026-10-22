@@ -39,10 +39,16 @@ FlashAddress flash_impl_get_sector_base_address(FlashAddress addr) {
   return addr & 0xfffff000;
 }
 
+//! How many status reads after each erase begins report it busy; 0 models a driver that erases
+//! synchronously.
+int erase_busy_reads_per_erase = 1;
+static int s_erase_busy_reads;
+
 int erase_subsector_begin_calls = 0;
 status_t erase_subsector_begin_return = S_SUCCESS;
 status_t flash_impl_erase_subsector_begin(FlashAddress addr) {
   erase_subsector_begin_calls++;
+  s_erase_busy_reads = erase_busy_reads_per_erase;
   return erase_subsector_begin_return;
 }
 
@@ -50,6 +56,7 @@ int erase_sector_begin_calls = 0;
 status_t erase_sector_begin_return = S_SUCCESS;
 status_t flash_impl_erase_sector_begin(FlashAddress addr) {
   erase_sector_begin_calls++;
+  s_erase_busy_reads = erase_busy_reads_per_erase;
   return erase_sector_begin_return;
 }
 
@@ -57,6 +64,10 @@ int get_erase_status_calls = 0;
 status_t (*get_erase_status_fn)(void) = return_success;
 status_t flash_impl_get_erase_status(void) {
   get_erase_status_calls++;
+  if (s_erase_busy_reads > 0) {
+    s_erase_busy_reads--;
+    return E_BUSY;
+  }
   return get_erase_status_fn();
 }
 
@@ -179,6 +190,8 @@ void test_flash_api__initialize(void) {
   erase_sector_begin_calls = 0;
   get_erase_status_calls = 0;
   get_erase_status_fn = return_success;
+  erase_busy_reads_per_erase = 1;
+  s_erase_busy_reads = 0;
   blank_check_subsector_calls = 0;
   blank_check_sector_calls = 0;
   typical_erase_duration_ms = 100;
@@ -243,6 +256,36 @@ void test_flash_api__short_blocking_erase_is_polled(void) {
   typical_erase_duration_ms = 1;
   flash_erase_subsector_blocking(0);
   cl_assert(get_erase_status_calls > 0);
+}
+
+void test_flash_api__synchronous_async_erase_completes_at_once(void) {
+  erase_busy_reads_per_erase = 0;
+  TimerID erase_timer = flash_api_get_erase_poll_timer_for_test();
+  flash_erase_sector(0, callback, (void *)1);
+  // Already over when the driver returned, so there is nothing to poll for.
+  cl_assert(!stub_new_timer_is_scheduled(erase_timer));
+  cl_assert_equal_p(callback_context, (void *)1);
+  cl_assert_equal_i(callback_status, S_SUCCESS);
+}
+
+void test_flash_api__synchronous_blocking_erase_completes_at_once(void) {
+  erase_busy_reads_per_erase = 0;
+  flash_erase_sector_blocking(0);
+  cl_assert_equal_i(erase_sector_begin_calls, 1);
+  // One check right after the erase and one to finish it, with no wait in between.
+  cl_assert_equal_i(get_erase_status_calls, 2);
+}
+
+void test_flash_api__synchronous_erase_error_is_retried_at_once(void) {
+  erase_busy_reads_per_erase = 0;
+  get_erase_status_fn = return_error;
+  uncorrectable_erase_error_cb_called = false;
+  TimerID erase_timer = flash_api_get_erase_poll_timer_for_test();
+  flash_erase_sector(0, uncorrectable_erase_error_cb, nullptr);
+  cl_assert(!stub_new_timer_is_scheduled(erase_timer));
+  cl_assert_equal_i(uncorrectable_erase_error_cb_called, true);
+  // The first attempt and three retries.
+  cl_assert_equal_i(erase_sector_begin_calls, 4);
 }
 
 void test_flash_api__short_async_erase_completes(void) {
