@@ -48,8 +48,9 @@ static bool s_force_wfi;
 
 //! Early wake-up ticks (to avoid over-sleeping due to wake-up latency)
 static const uint32_t EARLY_WAKEUP_TICKS = 4;
-//! Minimum ticks to enter deep sleep
-static const uint32_t MIN_DEEPSLEEP_TICKS = RTC_TICKS_HZ / 20;
+//! Minimum ticks to enter deep sleep. Each deep sleep pays for the early wake-up and for restarting
+//! the clocks, so shorter gaps are left to deep WFI; 20 ms keeps a margin over that cost.
+static const uint32_t MIN_DEEPSLEEP_TICKS = RTC_TICKS_HZ / 50;
 //! Maximum LPTIM counter value (24-bit)
 static const uint32_t MAX_LPTIM_CNT = 0xFFFFFFUL;
 
