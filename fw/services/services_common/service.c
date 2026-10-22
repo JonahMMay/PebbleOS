@@ -74,7 +74,9 @@ static struct ServiceRunLevelSetting s_runlevel_settings[] = {
   {.set_enable_fn = vibe_service_set_enabled,
    .enable_mask = R_LowPower | R_FirmwareUpdate | R_Normal},
   {
-    .set_enable_fn = bt_ctl_set_enabled,
+    // Starting the stack waits for the controller to come up; don't hold up e.g. the first app
+    // launch at boot for it.
+    .set_enable_fn = bt_ctl_set_enabled_async,
     .enable_mask = R_FirmwareUpdate | R_Normal,
   },
 #if defined(CONFIG_TOUCH) && defined(CONFIG_RECOVERY_FW)

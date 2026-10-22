@@ -180,6 +180,27 @@ void bt_ctl_set_enabled(bool enabled) {
   prv_comm_state_change(nullptr);
 }
 
+void bt_ctl_set_enabled_async(bool enabled) {
+  if (!enabled) {
+    // Runlevels without Bluetooth are set right before e.g. a factory reset wipes the flash, so
+    // the stack must be down by the time this returns.
+    bt_ctl_set_enabled(false);
+    return;
+  }
+  if (!s_comm_initialized) {
+    PBL_LOG_ERR("Error: Bluetooth isn't initialized yet");
+    return;
+  }
+  pbl_mutex_lock(&s_comm_state_change_mutex, PBL_FOREVER);
+  s_comm_enabled = true;
+  bool should_schedule_eval = !s_comm_state_change_eval_is_scheduled;
+  s_comm_state_change_eval_is_scheduled = true;
+  pbl_mutex_unlock(&s_comm_state_change_mutex);
+  if (should_schedule_eval) {
+    system_task_add_callback(prv_comm_state_change, nullptr);
+  }
+}
+
 void bt_ctl_set_override_mode(BtCtlModeOverride override) {
   if (!s_comm_initialized) {
     PBL_LOG_ERR("Error: Bluetooth isn't initialized yet");
