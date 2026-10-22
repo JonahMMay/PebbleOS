@@ -38,6 +38,8 @@ static bool s_system_hold_subscribed = false;
 static bool s_nav_enabled = false;
 static bool s_app_nav_active = false;
 static bool s_globally_enabled = true;
+//! The run level allows powering the sensor (off while stationary or in low power mode).
+static bool s_runlevel_enabled = true;
 static bool s_rotated = false;
 //! Set while an injected gesture owns the sensor, between its touchdown and liftoff. Physical
 //! samples are ignored for its duration so the synthetic path cannot be corrupted mid-swipe.
@@ -52,9 +54,9 @@ static void prv_apply_rotation(int16_t *x, int16_t *y) {
 
 static void prv_add_subscriber_cb(PebbleTask task) {
   pbl_mutex_lock(&s_touch_mutex, PBL_FOREVER);
-  // Honor the global kill switch: when touch is globally disabled, track the
-  // subscriber count but don't power up the sensor.
-  if (++s_subscriber_count == 1 && s_globally_enabled) {
+  // Honor the global kill switch and the run level: when either disables touch,
+  // track the subscriber count but don't power up the sensor.
+  if (++s_subscriber_count == 1 && s_globally_enabled && s_runlevel_enabled) {
     touch_sensor_set_enabled(true);
   }
   PBL_LOG_DBG("Touch: subscriber added, count=%" PRIu8, s_subscriber_count);
@@ -64,7 +66,7 @@ static void prv_add_subscriber_cb(PebbleTask task) {
 static void prv_remove_subscriber_cb(PebbleTask task) {
   pbl_mutex_lock(&s_touch_mutex, PBL_FOREVER);
   PBL_ASSERTN(s_subscriber_count > 0);
-  if (--s_subscriber_count == 0 && s_globally_enabled) {
+  if (--s_subscriber_count == 0 && s_globally_enabled && s_runlevel_enabled) {
     touch_sensor_set_enabled(false);
   }
   // An app whose shared touch subscription disappears (task exit, or both
@@ -137,7 +139,7 @@ void touch_service_set_globally_enabled(bool enabled) {
     return;
   }
   s_globally_enabled = enabled;
-  const bool sensor_enabled = enabled && (s_subscriber_count > 0);
+  const bool sensor_enabled = enabled && s_runlevel_enabled && (s_subscriber_count > 0);
   pbl_mutex_unlock(&s_touch_mutex);
 
   touch_sensor_set_enabled(sensor_enabled);
@@ -147,6 +149,27 @@ void touch_service_set_globally_enabled(bool enabled) {
     // zeroes the last coordinates.
     touch_release_active();
     // Avoid delivering stale position on re-enable.
+    touch_reset();
+  }
+}
+
+void touch_service_set_runlevel_enabled(bool enabled) {
+  pbl_mutex_lock(&s_touch_mutex, PBL_FOREVER);
+  if (s_runlevel_enabled == enabled) {
+    pbl_mutex_unlock(&s_touch_mutex);
+    return;
+  }
+  s_runlevel_enabled = enabled;
+  const bool sensor_used = s_globally_enabled && (s_subscriber_count > 0);
+  pbl_mutex_unlock(&s_touch_mutex);
+
+  if (!sensor_used) {
+    return;
+  }
+  touch_sensor_set_enabled(enabled);
+  if (!enabled) {
+    // Same teardown as the global switch: no finger may stay down across the off period.
+    touch_release_active();
     touch_reset();
   }
 }

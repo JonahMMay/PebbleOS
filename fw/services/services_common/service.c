@@ -85,6 +85,12 @@ static struct ServiceRunLevelSetting s_runlevel_settings[] = {
     .enable_mask = R_Normal,
   },
 #endif
+#if defined(CONFIG_SERVICE_TOUCH) && !defined(CONFIG_RECOVERY_FW)
+  {
+    .set_enable_fn = touch_service_set_runlevel_enabled,
+    .enable_mask = R_FirmwareUpdate | R_Normal,
+  },
+#endif
 #ifdef CONFIG_HRM
   {
     .set_enable_fn = hrm_manager_enable,

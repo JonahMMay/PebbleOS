@@ -136,6 +136,17 @@ void touch_service_set_globally_enabled(bool enabled);
 bool touch_service_is_globally_enabled(void);
 
 /**
+ * @brief Allow or forbid powering the sensor for the current run level.
+ *
+ * Unlike touch_service_set_globally_enabled(), this only powers the sensor down: the user
+ * setting and what apps see are unchanged. Keeps the sensor off while the watch is stationary
+ * or in low power mode.
+ *
+ * @param enabled true if the run level allows the sensor.
+ */
+void touch_service_set_runlevel_enabled(bool enabled);
+
+/**
  * @brief Pass a touch sample to the service.
  * Emits Touchdown or Liftoff on state changes and PositionUpdate
  * when a down finger moves. Dropped while touch is globally disabled or an injected gesture owns
