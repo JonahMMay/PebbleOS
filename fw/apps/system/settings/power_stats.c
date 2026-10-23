@@ -308,6 +308,19 @@ static int prv_append_boot(char *buf, size_t size) {
   int len = name ? snprintf(buf, size, "Last reset: %s\n", name)
                  : snprintf(buf, size, "Last reset: code %d\n", (int)code);
 
+  // Where a crash happened, for looking up in the ELF.
+  RebootReason reason;
+  reboot_reason_get_last(&reason);
+  if (code == RebootReasonCode_Watchdog) {
+    len += snprintf(buf + len, size - len, " pc %08" PRIx32 "\n lr %08" PRIx32 "\n",
+                    reason.watchdog.stuck_task_pc, reason.watchdog.stuck_task_lr);
+  } else if (code >= RebootReasonCode_Assert && code != RebootReasonCode_OutOfMemory) {
+    len += snprintf(buf + len, size - len, " lr %08" PRIx32 "\n", reason.extra.value);
+  } else if (code == RebootReasonCode_OutOfMemory) {
+    len += snprintf(buf + len, size - len, " lr %08" PRIx32 "\n",
+                    reason.heap_data.heap_alloc_lr);
+  }
+
   static const struct {
     BootTimingPoint point;
     const char *name;
