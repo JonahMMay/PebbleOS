@@ -12,14 +12,20 @@
 #include <system/reboot_reason.h>
 
 static RebootReasonCode s_last_reboot_reason_code = RebootReasonCode_Unknown;
+static RebootReason s_last_reboot_reason;
 RebootReasonCode reboot_reason_get_last_reboot_reason(void) {
   return s_last_reboot_reason_code;
+}
+
+void reboot_reason_get_last(RebootReason *reason) {
+  *reason = s_last_reboot_reason;
 }
 
 void debug_reboot_reason_print(McuRebootReason mcu_reboot_reason) {
   RebootReason reason;
   reboot_reason_get(&reason);
   s_last_reboot_reason_code = reason.code;
+  s_last_reboot_reason = reason;
 
   // We're out of flash space, scrape a few bytes back!
   static const char *rebooted_due_to = " rebooted due to ";
