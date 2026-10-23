@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <pbl/kernel/compiler.h>
 #include <pbl/kernel/init.h>
 
 extern uint8_t __data_load_start[];
@@ -22,7 +23,7 @@ extern uint8_t __ramfunc_end[];
 
 extern int main(void);
 
-void kernel_prep_c(void) {
+PBL_EXTERNALLY_VISIBLE PBL_USED void kernel_prep_c(void) {
   memcpy(__data_start, __data_load_start, __data_end - __data_start);
 #ifdef CONFIG_RAMFUNC
   memcpy(__ramfunc_start, __ramfunc_load_start, __ramfunc_end - __ramfunc_start);

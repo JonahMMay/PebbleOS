@@ -86,6 +86,12 @@ function(pbl_library_ramfunc)
       set(pattern "*/CMakeFiles/${PBL_CURRENT_LIBRARY}.dir/${object}")
     endif()
     set_property(GLOBAL APPEND PROPERTY PBL_RAMFUNC_OBJECTS "${pattern}")
+    # The linker script picks these objects by file name, and LTO would hand it its own partitions
+    # instead, leaving the code in flash.
+    if(CONFIG_LTO)
+      set_property(SOURCE ${source} TARGET_DIRECTORY ${PBL_CURRENT_LIBRARY}
+        APPEND PROPERTY COMPILE_OPTIONS -fno-lto)
+    endif()
   endforeach()
 endfunction()
 
