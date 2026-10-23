@@ -356,6 +356,8 @@ static bool prv_lsm6dso_enable_fifo(uint16_t num_samples) {
   return true;
 }
 
+static void prv_fifo_read_done(void);
+
 //! Salvage and dispatch any samples queued in the FIFO
 static void prv_lsm6dso_drain_fifo(void) {
   uint8_t status[2];
@@ -378,7 +380,7 @@ static void prv_lsm6dso_drain_fifo(void) {
   }
 
   prv_lsm6dso_process_samples(samples, prv_get_curr_system_time_us());
-  s_dev->state->last_fifo_read_tick = rtc_get_ticks();
+  prv_fifo_read_done();
 }
 
 static void prv_lsm6dso_recover(void);
@@ -463,7 +465,7 @@ static bool prv_lsm6dso_service_int1(Lsm6dsoInt1Pass pass, bool *fifo_progress) 
           return false;
         }
         timestamp_us = prv_get_curr_system_time_us();
-        s_dev->state->last_fifo_read_tick = rtc_get_ticks();
+        prv_fifo_read_done();
       }
     }
   }
@@ -731,6 +733,19 @@ static uint32_t prv_stall_threshold_ms(void) {
   return MAX(LSM6DSO_STALL_MARGIN * s_dev->state->int1_period_ms, LSM6DSO_STALL_MIN_MS);
 }
 
+//! Note a FIFO read and push the stall watchdog back a full threshold. While the stream keeps
+//! up the watchdog never fires, so it costs no wakeups of its own; after a stall it fires one
+//! threshold after the last read.
+static void prv_fifo_read_done(void) {
+  s_dev->state->last_fifo_read_tick = rtc_get_ticks();
+  if (s_dev->state->num_samples == 0U) {
+    return;
+  }
+  // Re-adding a registered callback restarts its count in place.
+  regular_timer_add_multisecond_callback(&s_dev->state->int1_wdt_timer,
+                                         DIVIDE_CEIL(prv_stall_threshold_ms(), 1000UL));
+}
+
 //! Arm/disarm the INT1 stall watchdog to match the active INT1 sources.
 //! Call after num_samples or shake_detection_enabled changes.
 static void prv_update_int1_watchdog(void) {
@@ -738,11 +753,9 @@ static void prv_update_int1_watchdog(void) {
   s_dev->state->shake_stuck_passes = 0U;
 
   if (s_dev->state->num_samples > 0U) {
-    s_dev->state->last_fifo_read_tick = rtc_get_ticks();
     s_dev->state->int1_period_ms =
         (s_dev->state->sampling_interval_us * s_dev->state->num_samples) / 1000;
-    regular_timer_add_multisecond_callback(
-        &s_dev->state->int1_wdt_timer, MAX(DIVIDE_CEIL(s_dev->state->int1_period_ms, 1000UL), 1U));
+    prv_fifo_read_done();
   } else if (s_dev->state->shake_detection_enabled) {
     regular_timer_add_multisecond_callback(&s_dev->state->int1_wdt_timer,
                                            LSM6DSO_SHAKE_WDT_PERIOD_S);
