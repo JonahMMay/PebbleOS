@@ -86,10 +86,32 @@ bool pbl_bt_advert_set_advertising_data(const struct pbl_bt_ad_data *ad_data) {
   return true;
 }
 
+//! Longest payload of an LE data channel PDU, and its air time on the 1M PHY, which the controller
+//! may then scale down for the 2M PHY (Bluetooth Core 5.x, Vol 6, Part B, 4.5.10).
+#define LL_MAX_TX_OCTETS  251
+#define LL_MAX_TX_TIME_US 2120
+
+//! Asks for the longest link-layer packets and the 2M PHY. Without them every 256-byte ATT packet
+//! goes over the air as about ten 27-byte packets at 1 Mbit/s, which caps bulk transfers such as
+//! firmware installs. The phone can refuse either and the link then stays as it is.
+static void prv_request_fast_link(uint16_t conn_handle) {
+  int rc = ble_gap_set_data_len(conn_handle, LL_MAX_TX_OCTETS, LL_MAX_TX_TIME_US);
+  if (rc != 0) {
+    PBL_LOG_WRN("Failed to request the data length (%d)", rc);
+  }
+  rc = ble_gap_set_prefered_le_phy(conn_handle, BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_2M_MASK,
+                                   BLE_GAP_LE_PHY_CODED_ANY);
+  if (rc != 0) {
+    PBL_LOG_WRN("Failed to request the 2M PHY (%d)", rc);
+  }
+}
+
 static void prv_handle_connection_event(struct ble_gap_event *event) {
   // we only want to notify on a successful connection
   if (event->connect.status != 0)
     return;
+
+  prv_request_fast_link(event->connect.conn_handle);
 
   struct ble_gap_conn_desc desc;
   if (ble_gap_conn_find(event->connect.conn_handle, &desc) != 0) {
