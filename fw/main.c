@@ -275,7 +275,8 @@ static PBL_NOINLINE void prv_main_task_init(void) {
 
   // The RTC needs be calibrated after the mfg registry service has been initialized so we can
   // load the measured frequency.
-#if defined(CONFIG_SOC_SF32LB52) && !defined(SF32LB52_USE_LXT)
+#if defined(CONFIG_SOC_SF32LB52) && !defined(SF32LB52_USE_LXT) && !defined(CONFIG_BT_HCI_SF32LB52)
+  // With the SF32LB52 Bluetooth transport, it does this once the LCPU has started.
   rc10k_init();
 #endif
   rtc_calibrate_frequency(mfg_info_get_rtc_freq());

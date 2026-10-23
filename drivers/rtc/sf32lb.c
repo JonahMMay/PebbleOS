@@ -114,6 +114,12 @@ static void prv_rtc_cal_timer_cb(void *data) {
     uint16_t sub;
     time_t t;
 
+    // The RC10K calibration may still be waiting for the LCPU to start; set the dividers from a
+    // measured frequency rather than the nominal one.
+    if (HAL_RC_CAL_get_average_cycle_on_48M() == 0UL) {
+      return;
+    }
+
     // Reconfiguring re-enters RTC init mode, which drops the current sub-second
     if (!s_rtc_div_calibrated) {
       prv_rtc_reconfig();

@@ -33,6 +33,9 @@ extern void pebble_pairing_service_init(void);
 extern void ppog_reversed_service_init(void);
 extern void nimble_discover_init(void);
 extern void nimble_gattc_op_queue_init(void);
+#ifdef CONFIG_BT_HCI_SF32LB52
+extern void ble_transport_ll_wait_ready(void);
+#endif
 
 #if NIMBLE_CFG_CONTROLLER
 static struct pbl_thread *s_ll_task_handle;
@@ -168,6 +171,10 @@ bool pbl_bt_start(struct pbl_bt_config *config) {
   }
 
   s_driver_state = DriverStateStarting;
+#ifdef CONFIG_BT_HCI_SF32LB52
+  // The transport powers the controller on in the background at boot.
+  ble_transport_ll_wait_ready();
+#endif
   // Drain a stale host_started signal (e.g. from an autonomous host re-sync)
   // so we wait for *this* start to sync.
   (void)(pbl_sem_take(&s_host_started, PBL_NO_WAIT) == 0);

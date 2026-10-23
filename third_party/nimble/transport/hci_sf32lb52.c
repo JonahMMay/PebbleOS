@@ -7,6 +7,7 @@
 #endif // NIMBLE_HCI_SF32LB52_TRACE_BINARY
 
 #include <pbl/bluetooth/id_addr.h>
+#include <pbl/drivers/sf32lb52/rc10k.h>
 #include <pbl/kernel/assert.h>
 #include <pbl/kernel/fatal.h>
 #include <pbl/kernel/irq.h>
@@ -48,8 +49,10 @@ PBL_LOG_MODULE_DECLARE(nimble, CONFIG_NIMBLE_LOG_LEVEL);
 #define BLE_HCI_EXT_SF32LB52_BLE_READY 0xFC11U
 
 static struct pbl_thread *s_hci_task_handle;
-PBL_THREAD_STACK_DEFINE(s_hci_task_stack, 1024);
+// The task also powers the LCPU on at boot, and the radio calibration that does needs ~1 KiB.
+PBL_THREAD_STACK_DEFINE(s_hci_task_stack, 2048);
 static PBL_SEM_DEFINE(s_ipc_data_ready, 0, 1);
+static PBL_SEM_DEFINE(s_lcpu_ready, 0, 1);
 /* Given by prv_acl_put_signal() whenever an LL-direction ACL mbuf is returned
  * to the transport pool; taken by the HCI RX task when an alloc fails so we
  * unblock as soon as the host has freed something instead of polling.
@@ -269,6 +272,18 @@ static int prv_hci_frame_cb(uint8_t pkt_type, void *data) {
 static void prv_hci_task_main(void *unused) {
   uint8_t buf[64];
 
+  // Powering the LCPU on calibrates the radio, which keeps the CPU busy for about a second. Do it
+  // below the app and KernelMain so the rest of the boot and the first app go on meanwhile.
+  pbl_thread_prio_set(pbl_thread_current(), PBL_PRIO_IDLE + 1);
+  lcpu_power_on();
+#ifndef SF32LB52_USE_LXT
+  // The RC10K calibration shares the LPSYS clocks and Bluetooth MAC with the radio calibration, so
+  // it can only start once that is over.
+  rc10k_init();
+#endif
+  pbl_thread_prio_set(pbl_thread_current(), PBL_PRIO_IDLE + 3);
+  pbl_sem_give(&s_lcpu_ready);
+
   while (true) {
     pbl_sem_take(&s_ipc_data_ready, PBL_FOREVER);
 
@@ -315,7 +330,7 @@ static void prv_nvds_config(void) {
 #endif
 }
 
-void ble_transport_ll_reinit(void) {
+static void prv_prepare_lcpu(void) {
   int ret;
 
   hci_h4_sm_init(&s_hci_h4sm, &s_hci_h4_allocs_from_ll, prv_hci_frame_cb);
@@ -324,7 +339,16 @@ void ble_transport_ll_reinit(void) {
   PBL_ASSERTN(ret == 0);
 
   prv_nvds_config();
+}
+
+void ble_transport_ll_reinit(void) {
+  prv_prepare_lcpu();
   lcpu_power_on();
+}
+
+void ble_transport_ll_wait_ready(void) {
+  pbl_sem_take(&s_lcpu_ready, PBL_FOREVER);
+  pbl_sem_give(&s_lcpu_ready);
 }
 
 void ble_transport_ll_init(void) {
@@ -333,7 +357,8 @@ void ble_transport_ll_init(void) {
   uart_set_baud_rate(HCI_TRACE_UART, 1000000);
 #endif
 
-  ble_transport_ll_reinit();
+  // The HCI task powers the LCPU on once it runs, see prv_hci_task_main().
+  prv_prepare_lcpu();
 
   ble_transport_register_put_acl_from_ll_cb(prv_acl_put_signal);
 
