@@ -56,8 +56,8 @@ inside the kernel. `pbl_sched_lock()` defers switches until unlocked.
 
 **Idle.** The idle thread yields to other threads at its priority, then
 calls the arch idle hook with the ticks until the next timeout. On Cortex-M
-that forwards to the SoC's `pbl_soc_idle()` when the gap is at least two
-ticks, and the SoC reports the sleep back with `pbl_idle_slept()`, which
+that forwards to the SoC's `pbl_soc_idle()` when the gap is at least one
+tick, and the SoC reports the sleep back with `pbl_idle_slept()`, which
 advances the clock and expires timeouts.
 
 **Threads.** `struct pbl_thread` is caller-owned; the backend state lives in
