@@ -310,7 +310,11 @@ void touch_sensor_init(void) {
 
   s_int_irq = irq;
 
-  touch_sensor_set_enabled(false);
+  // The chip was reset above, so put it straight to sleep rather than through
+  // touch_sensor_set_enabled(), which would reset it again.
+  uint8_t data = CST816_POWER_MODE_SLEEP;
+  prv_write_data(CST816_POWER_MODE_REG, &data, 1, 1);
+  prv_int_set_enabled(false);
 }
 
 static void prv_report_sample(bool down, int16_t x, int16_t y) {
