@@ -645,6 +645,9 @@ static PBL_NOINLINE void prv_update_last_written_page(uint16_t next_page) {
                   prv_page_to_flash_offset(next_page) + offsetof(PageHeader, last_written));
 }
 
+// Bumped each time find_free_page() has to garbage collect a sector to free a page.
+static uint32_t s_free_page_gc_count;
+
 //! The wear leveling strategy deployed is as follows:
 //!    Always track the last page which was written. Every time a new page needs
 //!    to be allocated, search for the next page that comes after the
@@ -723,6 +726,7 @@ static status_t find_free_page(uint16_t *free_page, bool use_gc_allocator, bool 
         // we can erase this region and have at least 1 free page after
         uint16_t sector_start_pg = curr_region * PFS_PAGES_PER_ERASE_SECTOR;
         garbage_collect_sector(&next_page, sector_start_pg, sectors_active);
+        s_free_page_gc_count++;
         break;
       }
     }
@@ -757,11 +761,13 @@ static void pfs_prepare_for_file_creation(uint32_t file_size, uint32_t max_elaps
   uint16_t last_written_page = s_last_page_written;
   while ((pages_to_find > 0) && (free_page != INVALID_PAGE)) {
     pbl_mutex_lock(&s_pfs_mutex, PBL_FOREVER);
+    const uint32_t gc_count = s_free_page_gc_count;
     find_free_page(&free_page, false, false);
+    const bool collected = (s_free_page_gc_count != gc_count);
     pbl_mutex_unlock(&s_pfs_mutex);
-    // TODO: might be nice to only sleep here if we had to perform GC as part
-    // of finding a free page
-    if ((pages_to_find % 4) == 0) {
+    // Garbage collection erases a sector, which takes a while, so let other
+    // tasks run after one. Pages that are already erased are found quickly.
+    if (collected) {
       pbl_sleep_ms(2);
     }
     pages_to_find--;
