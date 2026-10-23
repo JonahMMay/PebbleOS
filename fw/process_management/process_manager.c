@@ -9,6 +9,7 @@
 #include "worker_manager.h"
 
 #include <pbl/kernel/assert.h>
+#include <pbl/kernel/compiler.h>
 #include <pbl/kernel/debug.h>
 #include <pbl/kernel/fatal.h>
 #include <pbl/kernel/syscall.h>
@@ -99,7 +100,7 @@ static void prv_force_close_timer_callback(void *data) {
 // ---------------------------------------------------------------------------------------------
 // Right before a syscall drops privilege: a safe point to suspend a process the
 // kernel is trying to kill.
-void pbl_kernel_syscall_exit(void) {
+PBL_EXTERNALLY_VISIBLE PBL_USED void pbl_kernel_syscall_exit(void) {
   PebbleTask task = pebble_task_get_current();
   ProcessContext *context = prv_get_context_for_task(task);
 

@@ -133,6 +133,11 @@ if(NOT CONFIG_RECOVERY_FW AND (CONFIG_CPU_CORTEX_M OR CONFIG_SAMSA))
   pbl_native_sdk()
   add_dependencies(pbl_generated_headers pbl_native_sdk)
   set(PBL_FIRMWARE_SOURCES ${PBL_PEBBLE_AUTO_C})
+  # The jump table declares every exported function as void f() just to take its address, which
+  # LTO reports as a type mismatch against each definition. A table gains nothing from LTO.
+  if(CONFIG_LTO)
+    set_property(SOURCE ${PBL_PEBBLE_AUTO_C} APPEND PROPERTY COMPILE_OPTIONS -fno-lto)
+  endif()
 endif()
 if(NOT CONFIG_RECOVERY_FW AND CONFIG_CPU_CORTEX_M)
   pbl_sdk()

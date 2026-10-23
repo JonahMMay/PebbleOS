@@ -313,7 +313,7 @@ void sched_yield_current(void) {
 
 // ---- arch entry points ------------------------------------------------------
 
-struct pbl_thread *sched_switch_in(void) {
+PBL_EXTERNALLY_VISIBLE PBL_USED struct pbl_thread *sched_switch_in(void) {
   struct pbl_thread *prev = pbl_cur;
   struct pbl_thread *next = prv_pick();
   if (prev != next) {

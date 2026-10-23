@@ -9,3 +9,9 @@ pbl_library_sources(
   idle.c
 )
 pbl_linker_sources(ramfunc ramfunc.ld)
+
+# The deep sleep code runs from RAM with the flash powered down, so whatever it calls must be
+# inlined or in RAM too. LTO can leave such helpers out of line, in flash.
+if(CONFIG_LTO)
+  set_property(SOURCE idle.c APPEND PROPERTY COMPILE_OPTIONS -fno-lto)
+endif()
