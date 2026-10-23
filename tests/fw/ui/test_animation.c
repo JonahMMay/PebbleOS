@@ -21,6 +21,9 @@
 // Stubs
 #include <stubs_app_state.h>
 
+void task_timer_cb_stats_record(void *cb) {
+}
+
 // Fakes
 #include <fake_events.h>
 #include <fake_new_timer.h>
