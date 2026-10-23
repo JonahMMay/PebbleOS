@@ -180,13 +180,20 @@ PBL_SECTION_RAM void pbl_soc_idle(pbl_tick_t max_ticks) {
 
   __disable_irq();
 
-  if (!ipc_queue_check_idle()) {
+  // While the LCPU has not consumed our IPC traffic we must stay out of deep sleep and deep WFI,
+  // but plain WFI is fine: the tick and IPC interrupts still wake us, instead of spinning at full
+  // clock.
+  const bool ipc_busy = !ipc_queue_check_idle();
+  if (ipc_busy) {
     s_analytics_ipc_not_idle_count++;
-    goto end;
   }
 
   if (pbl_idle_confirm()) {
     SocSf32lbSleepLevel max_level = soc_sf32lb_sleep_max_level();
+
+    if (ipc_busy) {
+      max_level = MIN(max_level, SOC_SF32LB_WFI);
+    }
 
     // Deep sleep needs a minimum idle window.
     if (max_ticks < MIN_DEEPSLEEP_TICKS) {
@@ -265,7 +272,6 @@ PBL_SECTION_RAM void pbl_soc_idle(pbl_tick_t max_ticks) {
     }
   }
 
-end:
   __enable_irq();
 }
 
