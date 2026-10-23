@@ -326,10 +326,11 @@ static const TouchSensor touch_cst816 = {
 
 const TouchSensor *CST816 = &touch_cst816;
 
-PBL_I2C_SF32LB_DEFINE(s_i2c4, "i2c4", I2C4, 400000, PAD_PA09, I2C4_SCL, PAD_PA20, I2C4_SDA,
-                      nullptr);
+PBL_I2C_SF32LB_DMA_DEFINE(s_i2c4, "i2c4", I2C4, 400000, PAD_PA09, I2C4_SCL, PAD_PA20, I2C4_SDA,
+                          DMA1_Channel7, DMA_REQUEST_3, DMAC1_CH7, 5, nullptr);
 
 PBL_IRQ_CONNECT(I2C4, 5, pbl_i2c_sf32lb_irq_handler, &s_i2c4, 0);
+PBL_IRQ_CONNECT(DMAC1_CH7, 5, pbl_i2c_sf32lb_dma_irq_handler, &s_i2c4, 0);
 
 static const struct pbl_i2c_dev s_i2c_gh3x2x = PBL_I2C_DEV(&s_i2c4.bus, 0x14);
 

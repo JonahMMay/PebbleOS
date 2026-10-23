@@ -241,6 +241,19 @@ int pbl_i2c_read_block(const struct pbl_i2c_dev *dev, uint32_t size, uint8_t *re
   return prv_do_transfer(dev, &transfer);
 }
 
+int pbl_i2c_read_block_dma(const struct pbl_i2c_dev *dev, uint32_t size, uint8_t *result) {
+  PBL_ASSERTN(((uintptr_t)result & (DCACHE_LINE_SIZE_MAX - 1U)) == 0U);
+
+  struct pbl_i2c_transfer transfer = {
+    .dir = PBL_I2C_READ,
+    .size = size,
+    .data = result,
+    .dma = true,
+  };
+
+  return prv_do_transfer(dev, &transfer);
+}
+
 int pbl_i2c_write_block(const struct pbl_i2c_dev *dev, uint32_t size, const uint8_t *data) {
   PBL_ASSERTN(data);
 

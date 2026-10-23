@@ -15,8 +15,9 @@
  * @brief @ref drivers_i2c bus driver for the SF32LB I2C controller.
  *
  * Deep sleep is blocked while a transfer is in flight. A bus given a receive DMA channel serves
- * pbl_i2c_read_register_block_dma() reads of @ref I2C_SF32LB_DMA_MIN_BYTES or more through DMA,
- * so the CPU can sleep through the transfer instead of taking an interrupt per byte.
+ * pbl_i2c_read_register_block_dma() and pbl_i2c_read_block_dma() reads of
+ * @ref I2C_SF32LB_DMA_MIN_BYTES or more through DMA, so the CPU can sleep through the transfer
+ * instead of taking an interrupt per byte.
  *
  * The controller interrupt, and the DMA one if any, are connected by the board:
  *

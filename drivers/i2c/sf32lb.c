@@ -36,7 +36,7 @@ static void prv_deepsleep_allow(const struct pbl_i2c_sf32lb *i2c) {
 
 static bool prv_dma_usable(const struct pbl_i2c_sf32lb *i2c,
                            const struct pbl_i2c_transfer *transfer) {
-  return transfer->dma && i2c->state->hdma_rx.Instance != nullptr && transfer->with_reg &&
+  return transfer->dma && i2c->state->hdma_rx.Instance != nullptr &&
          transfer->dir == PBL_I2C_READ && transfer->size >= I2C_SF32LB_DMA_MIN_BYTES;
 }
 
@@ -109,8 +109,12 @@ static void prv_start_transfer(const struct pbl_i2c_bus *bus) {
     i2c->state->dma_size = transfer->size;
     dcache_invalidate(transfer->data, DCACHE_ROUND_UP(transfer->size));
     HAL_DMA_Init(&i2c->state->hdma_rx);
-    ret = HAL_I2C_Mem_Read_DMA(hdl, transfer->addr, transfer->reg, I2C_MEMADD_SIZE_8BIT,
-                               transfer->data, transfer->size);
+    if (transfer->with_reg) {
+      ret = HAL_I2C_Mem_Read_DMA(hdl, transfer->addr, transfer->reg, I2C_MEMADD_SIZE_8BIT,
+                                 transfer->data, transfer->size);
+    } else {
+      ret = HAL_I2C_Master_Receive_DMA(hdl, transfer->addr, transfer->data, transfer->size);
+    }
   } else if (transfer->with_reg) {
     if (transfer->dir == PBL_I2C_READ) {
       ret = HAL_I2C_Mem_Read_IT(hdl, transfer->addr, transfer->reg, I2C_MEMADD_SIZE_8BIT,
