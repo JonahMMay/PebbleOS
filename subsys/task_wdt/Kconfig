@@ -23,8 +23,10 @@ config TASK_WDT_CHECK_PERIOD_MS
     default 10000
     help
       How often the watchdog thread checks its channels and feeds the
-      hardware watchdog, waking the system up to do so. Must stay below
-      half of the hardware watchdog timeout.
+      hardware watchdog. The idle thread does the same check whenever the
+      CPU is about to idle and pushes the thread's next check back, so
+      the thread only wakes the system up when nothing else did for this
+      long. Must stay below half of the hardware watchdog timeout.
 
 config TASK_WDT_GRACE_MS
     int "Grace period in milliseconds"

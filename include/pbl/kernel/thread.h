@@ -197,6 +197,20 @@ void pbl_thread_yield(void);
 void pbl_thread_sleep(pbl_timeout_t timeout);
 
 /**
+ * @brief Restart the sleep of a thread blocked in pbl_thread_sleep().
+ *
+ * The sleep then ends @p timeout from now, which may be earlier or later than before. Lets
+ * another thread push back a periodic check that it has just done on the sleeper's behalf.
+ *
+ * @param t Sleeping thread.
+ * @param timeout New sleep time, counted from now; neither @ref PBL_FOREVER nor
+ *                @ref PBL_NO_WAIT.
+ * @retval 0 Restarted.
+ * @retval -EINVAL @p t is not blocked in pbl_thread_sleep().
+ */
+int pbl_thread_sleep_restart(struct pbl_thread *t, pbl_timeout_t timeout);
+
+/**
  * @brief Get the calling thread.
  *
  * Callable from unprivileged code.
