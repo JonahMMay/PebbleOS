@@ -174,6 +174,47 @@ void test_task_wdt__unfed_channel_calls_back_then_resets(void) {
   cl_assert_equal_i(s_reason.watchdog.stuck_task_callback, (uint32_t)(uintptr_t)&s_work);
 }
 
+static void prv_ticker_entry(void *arg) {
+  // Wakes the system twice a second, so the idle thread checks the channels in between.
+  for (;;) {
+    prv_sleep_ms(500);
+  }
+}
+
+void test_task_wdt__frequent_wakes_do_not_hide_a_stuck_channel(void) {
+  prv_spawn(0, "stuck", prv_stuck_entry, nullptr);
+  prv_spawn(1, "ticker", prv_ticker_entry, nullptr);
+  pbl_test_kernel_run();
+
+  // The idle checks pushed the thread's check back only while the channel was fed, so the
+  // expiry is still found within a check period and the system still resets.
+  cl_assert(s_callbacks >= 1);
+  cl_assert(s_first_callback_ms >= TIMEOUT_MS);
+  cl_assert(s_first_callback_ms < TIMEOUT_MS + PERIOD_MS);
+  cl_assert(s_reset);
+  cl_assert_equal_i(s_reset_ms, s_first_callback_ms + GRACE_MS);
+}
+
+static void prv_idle_feeding_entry(void *arg) {
+  int ch = pbl_task_wdt_add(nullptr, TIMEOUT_MS, prv_callback, nullptr);
+  cl_assert(ch >= 0);
+  for (int i = 0; i < 20; i++) {
+    prv_sleep_ms(TIMEOUT_MS / 4);
+    cl_assert_equal_i(pbl_task_wdt_feed(ch), 0);
+  }
+  pbl_test_kernel_stop();
+}
+
+void test_task_wdt__idle_checks_feed_the_hardware_watchdog(void) {
+  prv_spawn(0, "fed", prv_idle_feeding_entry, nullptr);
+  pbl_test_kernel_run();
+  cl_assert_equal_i(s_callbacks, 0);
+  cl_assert(!s_reset);
+  // 10 s of wake-ups every 500 ms: the idle thread fed the hardware watchdog about once a
+  // second, far more often than the 3 s check period configured for these tests alone would.
+  cl_assert(watchdog_feed_fake.call_count >= 9);
+}
+
 static void *prv_recovering_callback(int channel_id, void *user_data) {
   s_callbacks++;
   pbl_task_wdt_feed(channel_id);
