@@ -101,8 +101,13 @@ typedef struct HRMSubscriberState {
 /** @brief Size of the KernelBG event storage, in bytes. */
 #define EVENT_STORAGE_SIZE (sizeof(PebbleHRMEvent) * NUM_EVENTS_TO_QUEUE)
 
-/** @brief Accelerometer samples per accelerometer manager update. */
-#define HRM_MANAGER_ACCEL_MANAGER_SAMPLES_PER_UPDATE 4
+/**
+ * @brief Accelerometer samples per accelerometer manager update.
+ *
+ * 1 s at 25 Hz: the driver only reads the samples when it drains the sensor FIFO (every 1 s or
+ * more), so smaller batches only add wakeups.
+ */
+#define HRM_MANAGER_ACCEL_MANAGER_SAMPLES_PER_UPDATE 25
 
 /**
  * @brief Number of driver reports between checks for turning the sensor off.
