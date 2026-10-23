@@ -54,6 +54,7 @@
 #include <mfg/mfg_serials.h>
 #include <resource/resource.h>
 #include <resource/system_resource.h>
+#include <system/boot_timing.h>
 #include <system/bootbits.h>
 #include <system/firmware_storage.h>
 #include <system/version.h>
@@ -95,6 +96,7 @@ int main(void) {
   print_splash_screen();
 
   rtc_init();
+  boot_timing_mark(BootTimingKernelStart);
 
 #ifdef CONFIG_RECOVERY_FW
   boot_bit_clear(BOOT_BIT_RECOVERY_START_IN_PROGRESS);
@@ -239,6 +241,7 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   resource_init();
 
   system_resource_init();
+  boot_timing_mark(BootTimingResourcesReady);
 
 #ifdef CONFIG_HRM
   hrm_init(HRM);
@@ -248,6 +251,7 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   boot_splash_stop();
   // Can't use the compositor framebuffer until the compositor is initialized
   compositor_init();
+  boot_timing_mark(BootTimingDisplayReady);
   kernel_ui_init();
 
 #ifdef CONFIG_QEMU_SERIAL
@@ -285,6 +289,7 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   input_buttons_enable();
 
   pbl_task_wdt_resume();
+  boot_timing_mark(BootTimingDone);
 }
 
 static void main_task(void *parameter) {
