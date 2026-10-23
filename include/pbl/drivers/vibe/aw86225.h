@@ -39,6 +39,8 @@ struct pbl_aw86225_state {
   uint16_t vbat_mv;
   /** Playback running. */
   bool playing;
+  /** Held in reset to save power; brought back up on next use. */
+  bool suspended;
 };
 
 /** @brief AW86225 haptic driver. */

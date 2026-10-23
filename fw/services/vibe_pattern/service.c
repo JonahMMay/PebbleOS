@@ -41,6 +41,9 @@ static PBL_MUTEX_DEFINE(s_vibe_history_mutex);
 static VibeHistory *s_vibe_history = nullptr;
 static bool s_vibe_history_enabled = false;
 static bool s_vibe_service_enabled = true;
+//! Keep the motor driver powered between patterns, for prompt vibes. When false, it is powered
+//! down once a pattern ends and back up by the next one.
+static bool s_vibe_keep_powered = true;
 
 PBL_SYSCALL(bool, sys_vibe_history_was_vibrating, (VAL, uint64_t, time_search)) {
   bool rc = false;
@@ -249,6 +252,17 @@ static void prv_vibes_set_vibe_strength(int32_t new_strength) {
   s_vibe_strength = new_strength;
 }
 
+//! Power the motor driver down if nothing will drive it until the next pattern.
+//! The caller must be holding s_vibe_pattern_mutex
+static void prv_suspend_if_idle(void) {
+  pbl_mutex_assert_held(&s_vibe_pattern_mutex, true);
+  if ((s_vibe_service_enabled && s_vibe_keep_powered) || s_pattern_in_progress ||
+      (s_vibe_strength != VIBE_STRENGTH_OFF)) {
+    return;
+  }
+  (void)pbl_vibe_suspend(VIBE);
+}
+
 void vibe_service_set_enabled(bool enable) {
   pbl_mutex_lock(&s_vibe_pattern_mutex, PBL_FOREVER);
   if (enable != s_vibe_service_enabled) {
@@ -256,6 +270,14 @@ void vibe_service_set_enabled(bool enable) {
     prv_vibes_set_vibe_strength(VIBE_STRENGTH_OFF);
     s_vibe_service_enabled = enable;
   }
+  prv_suspend_if_idle();
+  pbl_mutex_unlock(&s_vibe_pattern_mutex);
+}
+
+void vibe_service_set_keep_powered(bool keep_powered) {
+  pbl_mutex_lock(&s_vibe_pattern_mutex, PBL_FOREVER);
+  s_vibe_keep_powered = keep_powered;
+  prv_suspend_if_idle();
   pbl_mutex_unlock(&s_vibe_pattern_mutex);
 }
 
@@ -303,6 +325,7 @@ static void prv_timer_callback(void *data) {
     s_pattern_in_progress = false;
     s_pattern_owner = VibePatternOwner_Other;
     PBL_LOG_DBG("vibe_pattern: pattern complete");
+    prv_suspend_if_idle();
   }
 
   pbl_mutex_unlock(&s_vibe_pattern_mutex);
@@ -447,6 +470,7 @@ static void prv_clear_pattern_locked(void) {
   prv_vibes_set_vibe_strength(VIBE_STRENGTH_OFF);
   s_pattern_in_progress = false;
   s_pattern_owner = VibePatternOwner_Other;
+  prv_suspend_if_idle();
 }
 
 PBL_SYSCALL(void, sys_vibe_pattern_clear) {
