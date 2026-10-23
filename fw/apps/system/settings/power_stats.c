@@ -13,6 +13,7 @@
 #include <pbl/services/battery/battery_state.h>
 #include <pbl/services/i18n/i18n.h>
 #include <pbl/soc/sf32lb/sleep.h>
+#include <pbl/util/size.h>
 #include <pbl/util/time.h>
 
 #include <applib/fonts/fonts.h>
@@ -20,6 +21,8 @@
 #include <applib/ui/ui.h>
 #include <kernel/pbl_malloc.h>
 #include <kernel/task_timer_manager.h>
+#include <system/boot_timing.h>
+#include <system/reboot_reason.h>
 
 typedef struct PowerStatsBaseline {
   SocSf32lbSleepStats sleep;
@@ -268,6 +271,77 @@ static int prv_append_timers(char *buf, size_t size, uint32_t seconds) {
   return len;
 }
 
+static const char *prv_reboot_reason_name(RebootReasonCode code) {
+  switch (code) {
+    case RebootReasonCode_LowBattery:
+      return "Low battery";
+    case RebootReasonCode_SoftwareUpdate:
+      return "Update";
+    case RebootReasonCode_ResetButtonsHeld:
+      return "Buttons held";
+    case RebootReasonCode_ShutdownMenuItem:
+      return "Shutdown";
+    case RebootReasonCode_RemoteReset:
+      return "Remote reset";
+    case RebootReasonCode_Watchdog:
+      return "Watchdog";
+    case RebootReasonCode_Assert:
+      return "Assert";
+    case RebootReasonCode_StackOverflow:
+      return "Stack overflow";
+    case RebootReasonCode_HardFault:
+      return "Hard fault";
+    case RebootReasonCode_OutOfMemory:
+      return "Out of memory";
+    case RebootReasonCode_CoreDump:
+    case RebootReasonCode_ForcedCoreDump:
+      return "Core dump";
+    default:
+      return nullptr;
+  }
+}
+
+//! Appends why the watch last reset and how long the boot took to reach each point.
+static int prv_append_boot(char *buf, size_t size) {
+  const RebootReasonCode code = reboot_reason_get_last_reboot_reason();
+  const char *name = prv_reboot_reason_name(code);
+  int len = name ? snprintf(buf, size, "Last reset: %s\n", name)
+                 : snprintf(buf, size, "Last reset: code %d\n", (int)code);
+
+  // Where a crash happened, for looking up in the ELF.
+  RebootReason reason;
+  reboot_reason_get_last(&reason);
+  if (code == RebootReasonCode_Watchdog) {
+    len += snprintf(buf + len, size - len, " pc %08" PRIx32 "\n lr %08" PRIx32 "\n",
+                    reason.watchdog.stuck_task_pc, reason.watchdog.stuck_task_lr);
+  } else if (code >= RebootReasonCode_Assert && code != RebootReasonCode_OutOfMemory) {
+    len += snprintf(buf + len, size - len, " lr %08" PRIx32 "\n", reason.extra.value);
+  } else if (code == RebootReasonCode_OutOfMemory) {
+    len += snprintf(buf + len, size - len, " lr %08" PRIx32 "\n",
+                    reason.heap_data.heap_alloc_lr);
+  }
+
+  static const struct {
+    BootTimingPoint point;
+    const char *name;
+  } s_points[] = {
+    { BootTimingSplashShown, "splash" },
+    { BootTimingDriversReady, "drivers" },
+    { BootTimingEarlyServicesReady, "early svc" },
+    { BootTimingResourcesReady, "resources" },
+    { BootTimingDisplayReady, "display" },
+    { BootTimingBluetoothStarted, "bt" },
+    { BootTimingServicesReady, "services" },
+    { BootTimingDone, "done" },
+  };
+  len += snprintf(buf + len, size - len, "Boot ms\n");
+  for (size_t i = 0; i < ARRAY_LENGTH(s_points); i++) {
+    len += snprintf(buf + len, size - len, " %s %" PRId32 "\n", s_points[i].name,
+                    boot_timing_get_ms(s_points[i].point));
+  }
+  return len;
+}
+
 static void prv_update_text(PowerStatsWindowData *data) {
   SocSf32lbSleepStats now;
   soc_sf32lb_sleep_stats_get(&now);
@@ -302,7 +376,8 @@ static void prv_update_text(PowerStatsWindowData *data) {
   prv_format_pct(deepwfi_pct, sizeof(deepwfi_pct), deepwfi, total);
   prv_format_pct(deepsleep_pct, sizeof(deepsleep_pct), deepsleep, total);
 
-  int len = snprintf(data->text, sizeof(data->text),
+  int len = prv_append_boot(data->text, sizeof(data->text));
+  len += snprintf(data->text + len, sizeof(data->text) - len,
                      "%s %" PRIu32 "d %" PRIu32 "h %" PRIu32 "m %" PRIu32 "s\n"
                      "Run %s\n"
                      "WFI %s\n"

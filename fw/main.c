@@ -54,6 +54,7 @@
 #include <mfg/mfg_serials.h>
 #include <resource/resource.h>
 #include <resource/system_resource.h>
+#include <system/boot_timing.h>
 #include <system/bootbits.h>
 #include <system/firmware_storage.h>
 #include <system/version.h>
@@ -95,6 +96,7 @@ int main(void) {
   print_splash_screen();
 
   rtc_init();
+  boot_timing_mark(BootTimingKernelStart);
 
 #ifdef CONFIG_RECOVERY_FW
   boot_bit_clear(BOOT_BIT_RECOVERY_START_IN_PROGRESS);
@@ -208,6 +210,7 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   system_task_timer_init();
 
   init_drivers();
+  boot_timing_mark(BootTimingDriversReady);
 
   clock_init();
 
@@ -223,6 +226,7 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   debug_init(s_mcu_reboot_reason);
 
   services_early_init();
+  boot_timing_mark(BootTimingEarlyServicesReady);
 
   debug_print_last_launched_app();
 
@@ -240,6 +244,7 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   resource_init();
 
   system_resource_init();
+  boot_timing_mark(BootTimingResourcesReady);
 
 #ifdef CONFIG_HRM
   hrm_init(HRM);
@@ -255,14 +260,17 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   boot_splash_stop();
   // Can't use the compositor framebuffer until the compositor is initialized
   compositor_init();
+  boot_timing_mark(BootTimingDisplayReady);
   kernel_ui_init();
 
 #ifdef CONFIG_QEMU_SERIAL
   qemu_serial_init();
 #endif
   pbl_bt_init();
+  boot_timing_mark(BootTimingBluetoothStarted);
 
   services_init();
+  boot_timing_mark(BootTimingServicesReady);
 
   // The RTC needs be calibrated after the mfg registry service has been initialized so we can
   // load the measured frequency.
@@ -294,6 +302,7 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   debounced_button_init();
 
   pbl_task_wdt_resume();
+  boot_timing_mark(BootTimingDone);
 }
 
 static void main_task(void *parameter) {
