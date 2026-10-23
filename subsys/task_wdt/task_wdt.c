@@ -10,6 +10,7 @@
 #include <pbl/drivers/watchdog.h>
 #include <pbl/kernel/assert.h>
 #include <pbl/kernel/debug.h>
+#include <pbl/kernel/idle.h>
 #include <pbl/kernel/irq.h>
 #include <pbl/kernel/thread.h>
 #include <pbl/kernel/time.h>
@@ -29,6 +30,9 @@ static_assert(NUM_CHANNELS <= 8, "the reboot reason records the channels as 8-bi
 static_assert(CONFIG_TASK_WDT_CHECK_PERIOD_MS < CONFIG_WATCHDOG_TIMEOUT_MS / 2,
               "the hardware watchdog must outlast the check period");
 #endif
+
+//! The idle thread checks the channels at most this often.
+#define IDLE_CHECK_INTERVAL_MS 1000
 
 struct channel {
   struct pbl_thread *thread;
@@ -56,6 +60,8 @@ static bool s_suspended;
 static bool s_suspend_timed;
 static pbl_tick_t s_suspend_until;
 static bool s_stalled;
+static bool s_started;
+static pbl_tick_t s_idle_check_at;
 
 static struct pbl_thread s_thread;
 PBL_THREAD_STACK_DEFINE(s_stack, CONFIG_TASK_WDT_THREAD_STACK_SIZE);
@@ -81,6 +87,20 @@ static bool prv_valid(int channel_id) {
   return channel_id >= 0 && channel_id < NUM_CHANNELS && s_channels[channel_id].active;
 }
 
+//! Ends a timed suspension that ran out; while suspended, keeps every channel fed.
+static void prv_update_suspend_locked(pbl_tick_t now) {
+  if (s_suspended && s_suspend_timed && prv_reached(now, s_suspend_until)) {
+    s_suspended = false;
+  }
+  if (s_suspended) {
+    prv_feed_all_locked(now);
+  }
+}
+
+static bool prv_expired_locked(const struct channel *ch, pbl_tick_t now) {
+  return ch->active && !ch->waiting && prv_reached(now, ch->deadline);
+}
+
 static size_t prv_collect_expired(struct expired *expired, uint8_t *fed_mask,
                                   uint8_t *active_mask) {
   size_t num_expired = 0;
@@ -90,19 +110,14 @@ static size_t prv_collect_expired(struct expired *expired, uint8_t *fed_mask,
   *active_mask = 0;
 
   pbl_irq_lock();
-  if (s_suspended && s_suspend_timed && prv_reached(now, s_suspend_until)) {
-    s_suspended = false;
-  }
-  if (s_suspended) {
-    prv_feed_all_locked(now);
-  }
+  prv_update_suspend_locked(now);
   for (int i = 0; i < NUM_CHANNELS; i++) {
     struct channel *ch = &s_channels[i];
     if (!ch->active) {
       continue;
     }
     *active_mask |= 1u << i;
-    if (ch->waiting || !prv_reached(now, ch->deadline)) {
+    if (!prv_expired_locked(ch, now)) {
       *fed_mask |= 1u << i;
       continue;
     }
@@ -226,6 +241,40 @@ static void prv_thread_entry(void *arg) {
   }
 }
 
+//! The CPU is about to idle anyway: check the channels here and, if none has expired, feed the
+//! hardware watchdog and push the watchdog thread's next check back a full period. While anything
+//! else keeps waking the system, the thread then never wakes it just for a check. Once a channel
+//! has expired the hook stops pushing the check back, so the thread finds it on its next check,
+//! no later than one check period after the deadline, and reports it. A thread that never blocks
+//! keeps the CPU from idling, so the hardware watchdog catches that one.
+void pbl_idle_hook(void) {
+  if (!s_started || s_stalled) {
+    return;
+  }
+
+  pbl_irq_lock();
+  pbl_tick_t now = pbl_uptime_ticks();
+  if (!prv_reached(now, s_idle_check_at)) {
+    pbl_irq_unlock();
+    return;
+  }
+  prv_update_suspend_locked(now);
+  bool expired = false;
+  for (int i = 0; i < NUM_CHANNELS; i++) {
+    expired |= prv_expired_locked(&s_channels[i], now);
+  }
+  if (!expired) {
+    s_idle_check_at = now + pbl_ms_to_ticks(IDLE_CHECK_INTERVAL_MS);
+  }
+  pbl_irq_unlock();
+
+  if (expired) {
+    return;
+  }
+  watchdog_feed();
+  (void)pbl_thread_sleep_restart(&s_thread, PBL_MSEC(CONFIG_TASK_WDT_CHECK_PERIOD_MS));
+}
+
 void pbl_task_wdt_init(void) {
   pbl_irq_lock();
   prv_feed_all_locked(pbl_uptime_ticks());
@@ -240,6 +289,7 @@ void pbl_task_wdt_init(void) {
     .stack_size = sizeof(s_stack),
   };
   PBL_ASSERTN(pbl_thread_create(&s_thread, &attr) == 0);
+  s_started = true;
 }
 
 int pbl_task_wdt_add(struct pbl_thread *thread, uint32_t timeout_ms,
@@ -366,5 +416,7 @@ void pbl_task_wdt_reset_for_test(void) {
   s_suspend_timed = false;
   s_suspend_until = 0;
   s_stalled = false;
+  s_started = false;
+  s_idle_check_at = 0;
 }
 #endif

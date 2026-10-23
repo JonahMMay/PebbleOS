@@ -351,9 +351,13 @@ struct pbl_thread *sched_idle_thread(void) {
   return &s_idle_thread;
 }
 
+PBL_WEAK void pbl_idle_hook(void) {
+}
+
 static void prv_idle_entry(void *arg) {
   (void)arg;
   for (;;) {
+    pbl_idle_hook();
     pbl_irq_lock();
     // Give other threads at the idle priority their turn first.
     if (s_ready_head[PBL_PRIO_IDLE]->backend.next) {
@@ -442,6 +446,22 @@ void pbl_thread_sleep(pbl_timeout_t timeout) {
   pbl_irq_lock();
   sched_block(nullptr, timeout);
   pbl_irq_unlock();
+}
+
+int pbl_thread_sleep_restart(struct pbl_thread *t, pbl_timeout_t timeout) {
+  PBL_ASSERTN(!pbl_timeout_is_forever(timeout) && !pbl_timeout_is_no_wait(timeout));
+  int rc = -EINVAL;
+  pbl_irq_lock();
+  // pbl_thread_sleep() is the only blocking call with no wait queue, only its timeout can wake
+  // it.
+  if (t->backend.state == PBL_THREAD_BLOCKED && t->backend.waitq == nullptr &&
+      t->backend.on_timeout_list) {
+    prv_timeout_remove(t);
+    prv_timeout_add(t, timeout.ticks);
+    rc = 0;
+  }
+  pbl_irq_unlock();
+  return rc;
 }
 
 // ---- idle interface ---------------------------------------------------------

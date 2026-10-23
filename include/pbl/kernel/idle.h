@@ -71,4 +71,14 @@ void pbl_idle_slept(pbl_tick_t elapsed);
 /** @brief Tick interrupt body, for SoCs that own the SysTick handler. */
 void pbl_kernel_tick_isr(void);
 
+/**
+ * @brief Run work that can wait for the CPU to go idle.
+ *
+ * Called by the idle thread each time nothing is runnable, before it works out how long it may
+ * sleep, so a timeout the hook moves is taken into account. Runs with interrupts enabled and must
+ * not block. The kernel's definition is weak and empty; a subsystem that would otherwise wake the
+ * system for periodic housekeeping overrides it to do that work while the CPU is awake anyway.
+ */
+void pbl_idle_hook(void);
+
 /** @} */
