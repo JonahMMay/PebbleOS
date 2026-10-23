@@ -82,13 +82,23 @@ bool bt_ctl_is_bluetooth_running(void);
 void bt_ctl_set_airplane_mode_async(bool enabled);
 
 /**
- * @brief Enable or disable Bluetooth, as requested by the runlevel system.
+ * @brief Enable or disable Bluetooth.
  *
  * Starts or stops the stack synchronously as needed.
  *
  * @param enabled True to enable.
  */
 void bt_ctl_set_enabled(bool enabled);
+
+/**
+ * @brief Enable or disable Bluetooth, as requested by the runlevel system.
+ *
+ * Stops the stack synchronously, but starts it later from KernelBG, so that the caller, such as
+ * the boot sequence, can go on while the controller comes up.
+ *
+ * @param enabled True to enable.
+ */
+void bt_ctl_set_enabled_async(bool enabled);
 
 /**
  * @brief Set the airplane mode override.
