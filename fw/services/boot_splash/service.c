@@ -14,6 +14,7 @@
 #include <board/display.h>
 #include <board/splash.h>
 #include <kernel/pbl_malloc.h>
+#include <system/boot_timing.h>
 
 // Platform-specific colors: PebbleOS uses ARGB2222 (GColor8), not raw RGB332
 #if defined(CONFIG_QEMU) || defined(CONFIG_SOC_POSIX)
@@ -128,6 +129,7 @@ static void prv_boot_splash_task(void *param) {
 
     // Send frame to display
     display_update_boot_frame(fb);
+    boot_timing_mark(BootTimingSplashShown);
 
     frame++;
 
