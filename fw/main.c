@@ -245,14 +245,15 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   hrm_init(HRM);
 #endif
 
+  // On the platforms with a splash, its task initializes the display. Let it finish, but keep
+  // the animation going until the first app is about to draw.
+  boot_splash_wait_for_display();
+
   // The display has to be initialized before bluetooth because on Snowy the
   // display FPGA shares the 32 kHz clock signal with bluetooth. If the FPGA is
   // not programmed when we attempt to initialize bluetooth, it prevents the
   // clock from reaching the bluetooth module and initialization fails.
   display_init();
-
-  // Stop boot splash before initializing compositor
-  boot_splash_stop();
   // Can't use the compositor framebuffer until the compositor is initialized
   compositor_init();
   kernel_ui_init();
@@ -292,6 +293,9 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   // Initialize button driver at the last moment to prevent "system on" button press from
   // entering the kernel event queue.
   debounced_button_init();
+
+  // Nothing draws until the launcher starts the first app, so keep the splash animating until now.
+  boot_splash_stop();
 
   pbl_task_wdt_resume();
 }
