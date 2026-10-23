@@ -9,8 +9,12 @@
 typedef enum {
   BootTimingKernelStart, //!< main() starts.
   BootTimingSplashShown, //!< The boot splash puts its first frame on the display.
+  BootTimingDriversReady, //!< The drivers are initialized.
+  BootTimingEarlyServicesReady, //!< The services needed before the resources are initialized.
   BootTimingResourcesReady, //!< System resources are installed and checked.
   BootTimingDisplayReady, //!< The splash is gone and the compositor can take the display.
+  BootTimingBluetoothStarted, //!< The Bluetooth service is initialized.
+  BootTimingServicesReady, //!< The rest of the services are initialized.
   BootTimingDone, //!< KernelMain is done initializing the system.
   BootTiming_Count,
 } BootTimingPoint;

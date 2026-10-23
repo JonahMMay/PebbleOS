@@ -313,8 +313,12 @@ static int prv_append_boot(char *buf, size_t size) {
     const char *name;
   } s_points[] = {
     { BootTimingSplashShown, "splash" },
+    { BootTimingDriversReady, "drivers" },
+    { BootTimingEarlyServicesReady, "early svc" },
     { BootTimingResourcesReady, "resources" },
     { BootTimingDisplayReady, "display" },
+    { BootTimingBluetoothStarted, "bt" },
+    { BootTimingServicesReady, "services" },
     { BootTimingDone, "done" },
   };
   len += snprintf(buf + len, size - len, "Boot ms\n");
