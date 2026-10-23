@@ -25,7 +25,7 @@
 PBL_LOG_MODULE_DEFINE(driver_display_jdi, CONFIG_DRIVER_DISPLAY_LOG_LEVEL);
 
 #define POWER_SEQ_DELAY_TIME_US         11000
-#define POWER_RESET_CYCLE_DELAY_TIME_US 500000
+#define POWER_RESET_CYCLE_DELAY_TIME_MS 500
 
 // Timeout for detecting the SiFli HAL silent-loss bug: the LCDC kicks off a
 // transfer but never delivers the EOF callback, so the compositor would block
@@ -117,7 +117,9 @@ static void prv_power_cycle(void) {
   pbl_gpio_set(&DISPLAY->vddp, false);
   pbl_gpio_set(&DISPLAY->vlcd, false);
 
-  pbl_busy_wait_us(POWER_RESET_CYCLE_DELAY_TIME_US);
+  // Sleep rather than spin: at boot this runs on the boot splash task, and the rest of the boot
+  // carries on meanwhile.
+  pbl_sleep_ms(POWER_RESET_CYCLE_DELAY_TIME_MS);
 }
 
 static void prv_display_on() {

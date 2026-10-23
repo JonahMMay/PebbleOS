@@ -48,6 +48,7 @@ static struct pbl_thread s_boot_splash_thread;
 PBL_THREAD_STACK_DEFINE(s_boot_splash_stack, BOOT_SPLASH_TASK_STACK_SIZE);
 static struct pbl_thread *s_boot_splash_task;
 static volatile bool s_boot_splash_running;
+static volatile bool s_display_ready;
 static uint8_t *s_boot_splash_fb;
 
 // Draw a filled rectangle
@@ -94,6 +95,11 @@ static void prv_draw_progress_bar(uint8_t *fb, int16_t center_x, int16_t center_
 
 // Boot splash task - runs until stopped
 static void prv_boot_splash_task(void *param) {
+  // Bringing the display up can take a while, e.g. to power-cycle the panel, so it's done here
+  // rather than in boot_splash_start() to let KernelMain carry on booting meanwhile.
+  display_init();
+  s_display_ready = true;
+
   uint8_t *fb = s_boot_splash_fb;
   uint16_t frame = 0;
 
@@ -147,12 +153,10 @@ static void prv_boot_splash_task(void *param) {
 }
 
 void boot_splash_start(void) {
-  // Initialize the display
-  display_init();
-
   // Allocate framebuffer for boot splash
   s_boot_splash_fb = kernel_malloc(BOOT_SPLASH_FB_BYTES);
   if (!s_boot_splash_fb) {
+    display_init();
     return;
   }
 
@@ -168,6 +172,17 @@ void boot_splash_start(void) {
   };
   if (pbl_thread_create(&s_boot_splash_thread, &attr) == 0) {
     s_boot_splash_task = &s_boot_splash_thread;
+  } else {
+    s_boot_splash_running = false;
+    kernel_free(s_boot_splash_fb);
+    s_boot_splash_fb = nullptr;
+    display_init();
+  }
+}
+
+void boot_splash_wait_for_display(void) {
+  while (s_boot_splash_task != nullptr && !s_display_ready) {
+    pbl_sleep_ms(10);
   }
 }
 
@@ -211,6 +226,10 @@ void boot_splash_stop(void) {
 #else // Everything else
 
 void boot_splash_start(void) {
+  // No-op on platforms where the bootloader handles the splash
+}
+
+void boot_splash_wait_for_display(void) {
   // No-op on platforms where the bootloader handles the splash
 }
 
