@@ -210,6 +210,7 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   system_task_timer_init();
 
   init_drivers();
+  boot_timing_mark(BootTimingDriversReady);
 
   clock_init();
 
@@ -225,6 +226,7 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   debug_init(s_mcu_reboot_reason);
 
   services_early_init();
+  boot_timing_mark(BootTimingEarlyServicesReady);
 
   debug_print_last_launched_app();
 
@@ -265,8 +267,10 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   qemu_serial_init();
 #endif
   pbl_bt_init();
+  boot_timing_mark(BootTimingBluetoothStarted);
 
   services_init();
+  boot_timing_mark(BootTimingServicesReady);
 
   // The RTC needs be calibrated after the mfg registry service has been initialized so we can
   // load the measured frequency.
