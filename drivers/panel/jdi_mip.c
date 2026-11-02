@@ -65,8 +65,10 @@ static int prv_prepare(const struct pbl_panel *panel) {
   uint64_t off = pbl_uptime_ms() - jdi->state->off_ms;
   int ret;
 
+  // Sleep rather than spin: at boot this runs on the boot splash task, and the rest of the boot
+  // carries on meanwhile.
   if (off < OFF_TIME_MS) {
-    pbl_busy_wait_us((OFF_TIME_MS - (uint32_t)off) * 1000U);
+    pbl_sleep_ms(OFF_TIME_MS - (uint32_t)off);
   }
 
   ret = pbl_gpio_set(&jdi->vlcd, true);

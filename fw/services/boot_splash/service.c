@@ -43,6 +43,8 @@ static struct pbl_thread s_boot_splash_thread;
 PBL_THREAD_STACK_DEFINE(s_boot_splash_stack, BOOT_SPLASH_TASK_STACK_SIZE);
 static struct pbl_thread *s_boot_splash_task;
 static volatile bool s_boot_splash_running;
+static volatile bool s_display_ready;
+static bool s_display_ok;
 static struct pbl_display_buffer s_boot_splash_fb;
 
 static uint32_t prv_pitch(void) {
@@ -145,6 +147,14 @@ static void prv_boot_splash_task(void *param) {
   const struct pbl_display_buffer *fb = &s_boot_splash_fb;
   uint16_t frame = 0;
 
+  // Bringing the display up can take a while, e.g. to power-cycle the panel, so it's done here
+  // rather than in boot_splash_start() to let KernelMain carry on booting meanwhile.
+  s_display_ok = (pbl_device_init(&DISPLAY->dev) == 0);
+  s_display_ready = true;
+  if (!s_display_ok) {
+    s_boot_splash_running = false;
+  }
+
   // Progress bar below the centered logo
   int16_t progress_cx = DISPLAY->width / 2;
   int16_t progress_cy = (DISPLAY->height - splash_height) / 2 + splash_height + 20;
@@ -172,16 +182,13 @@ static void prv_boot_splash_task(void *param) {
 }
 
 void boot_splash_start(void) {
-  if (pbl_device_init(&DISPLAY->dev) != 0) {
-    return;
-  }
-
   // Allocate framebuffer for boot splash
   s_boot_splash_fb = (struct pbl_display_buffer){
     .data = pbl_malloc(prv_fb_bytes()),
     .pitch = prv_pitch(),
   };
   if (s_boot_splash_fb.data == nullptr) {
+    (void)pbl_device_init(&DISPLAY->dev);
     return;
   }
 
@@ -197,15 +204,31 @@ void boot_splash_start(void) {
   };
   if (pbl_thread_create(&s_boot_splash_thread, &attr) == 0) {
     s_boot_splash_task = &s_boot_splash_thread;
+  } else {
+    s_boot_splash_running = false;
+    pbl_free(s_boot_splash_fb.data);
+    s_boot_splash_fb.data = nullptr;
+    (void)pbl_device_init(&DISPLAY->dev);
+  }
+}
+
+void boot_splash_wait_for_display(void) {
+  while (s_boot_splash_task != nullptr && !s_display_ready) {
+    pbl_sleep_ms(10);
   }
 }
 
 void boot_splash_stop(void) {
-  if (s_boot_splash_running && s_boot_splash_task != nullptr) {
+  // The task clears s_boot_splash_running itself if the display failed to come up
+  if (s_boot_splash_task != nullptr) {
     s_boot_splash_running = false;
     // Wait for the splash task to finish (max ~10ms delay due to short sleep intervals)
     while (s_boot_splash_task != nullptr) {
       pbl_sleep_ms(10);
+    }
+
+    if (!s_display_ok) {
+      return;
     }
 
     // Draw final frame with logo only (no progress bar)
@@ -225,6 +248,10 @@ void boot_splash_stop(void) {
 #else // Everything else
 
 void boot_splash_start(void) {
+  // No-op on platforms where the bootloader handles the splash
+}
+
+void boot_splash_wait_for_display(void) {
   // No-op on platforms where the bootloader handles the splash
 }
 

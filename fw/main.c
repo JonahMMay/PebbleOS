@@ -244,8 +244,9 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   hrm_init(HRM);
 #endif
 
-  // Stop boot splash before initializing compositor
-  boot_splash_stop();
+  // On the platforms with a splash, its task initializes the display. Let it finish, but keep
+  // the animation going until the first app is about to draw.
+  boot_splash_wait_for_display();
   // Can't use the compositor framebuffer until the compositor is initialized
   compositor_init();
   kernel_ui_init();
@@ -283,6 +284,9 @@ static PBL_NOINLINE void prv_main_task_init(void) {
 #endif
 
   input_buttons_enable();
+
+  // Nothing draws until the launcher starts the first app, so keep the splash animating until now.
+  boot_splash_stop();
 
   pbl_task_wdt_resume();
 }
