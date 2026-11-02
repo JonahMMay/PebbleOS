@@ -214,7 +214,10 @@ PBL_PINCTRL_STATE_DEFINE(s_i2c4_default, SF32LB52_PINCTRL,
                              PBL_PINCTRL_SF32LB52_DRIVE_8MA,
                          SF32LB52_PA20_I2C4_SDA | PBL_PINCTRL_SF32LB52_INPUT |
                              PBL_PINCTRL_SF32LB52_DRIVE_8MA);
-PBL_I2C_SF32LB_DEFINE(s_i2c4, "i2c4", 4, 400000, &s_i2c4_default, nullptr);
+// Request 3 is otherwise only UART5 RX, which obelix does not use
+static const struct pbl_dma_chan s_i2c4_dma =
+    PBL_DMA_CHAN(SF32LB52_DMAC1, 6, SF32LB52_DMA_REQ_I2C4, SF32LB52_DMA_PL_HIGH);
+PBL_I2C_SF32LB_DMA_DEFINE(s_i2c4, "i2c4", 4, 400000, &s_i2c4_default, &s_i2c4_dma, nullptr);
 
 PBL_IRQ_CONNECT(I2C4, 5, pbl_i2c_sf32lb_irq_handler, &s_i2c4, 0);
 
