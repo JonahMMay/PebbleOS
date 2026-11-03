@@ -97,6 +97,61 @@ void test_kernel__sleep_advances_virtual_time(void) {
   cl_assert_equal_s(s_trace, "S");
 }
 
+static pbl_tick_t s_woke_at;
+
+static void prv_long_sleeper(void *arg) {
+  pbl_thread_sleep(PBL_TICKS(100));
+  s_woke_at = pbl_uptime_ticks();
+  prv_trace('w');
+}
+
+static void prv_sleep_restarter(void *arg) {
+  struct pbl_thread *sleeper = arg;
+  pbl_thread_sleep(PBL_TICKS(10));
+  cl_assert_equal_i(pbl_thread_sleep_restart(sleeper, PBL_TICKS(150)), 0);
+  pbl_thread_sleep(PBL_TICKS(200));
+  // Gone from the timeout list once it woke, so there is nothing to restart.
+  cl_assert_equal_i(pbl_thread_sleep_restart(sleeper, PBL_TICKS(5)), -EINVAL);
+  prv_trace('r');
+  pbl_test_kernel_stop();
+}
+
+void test_kernel__sleep_restart_moves_the_wake_up(void) {
+  s_woke_at = 0;
+  struct pbl_thread *sleeper = prv_spawn(0, "sleeper", 2, prv_long_sleeper, nullptr);
+  prv_spawn(1, "restarter", 3, prv_sleep_restarter, sleeper);
+  pbl_test_kernel_run();
+  // Restarted 10 ticks in for 150 more: the original 100-tick wake-up never happens.
+  cl_assert_equal_i(s_woke_at, 160);
+  cl_assert_equal_s(s_trace, "wr");
+}
+
+static void prv_restart_waiter(void *arg) {
+  struct pbl_sem *sem = arg;
+  pbl_sem_take(sem, PBL_TICKS(100));
+  prv_trace('t');
+}
+
+static void prv_restart_not_sleeping(void *arg) {
+  struct pbl_thread *waiter = arg;
+  pbl_thread_sleep(PBL_TICKS(10));
+  // Blocked on a semaphore with a timeout is not a sleep.
+  cl_assert_equal_i(pbl_thread_sleep_restart(waiter, PBL_TICKS(500)), -EINVAL);
+  pbl_thread_sleep(PBL_TICKS(200));
+  prv_trace('r');
+  pbl_test_kernel_stop();
+}
+
+static struct pbl_sem s_restart_sem;
+
+void test_kernel__sleep_restart_leaves_other_waits_alone(void) {
+  pbl_sem_init(&s_restart_sem, 0, 1);
+  struct pbl_thread *waiter = prv_spawn(0, "waiter", 2, prv_restart_waiter, &s_restart_sem);
+  prv_spawn(1, "restarter", 3, prv_restart_not_sleeping, waiter);
+  pbl_test_kernel_run();
+  cl_assert_equal_s(s_trace, "tr");
+}
+
 static void prv_rr_entry(void *arg) {
   char c = (char)(uintptr_t)arg;
   for (int i = 0; i < 3; i++) {
