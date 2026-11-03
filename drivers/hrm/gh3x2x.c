@@ -11,12 +11,17 @@
 
 #ifdef CONFIG_GH3X2X_ALGO
 #include <math.h>
+#include <string.h>
 
+#include <pbl/drivers/i2c.h>
+#include <pbl/kernel/compiler.h>
+#include <pbl/mcu/cache.h>
 #include <pbl/services/hrm/hrm_manager.h>
 #include <pbl/services/system_task.h>
 
 #include <gh3x2x_demo_mp.h>
 #include <gh_demo.h>
+#include <gh_demo_config.h>
 #include <gh_demo_inner.h>
 #include <goodix_hba.h>
 #include <kernel/events.h>
@@ -70,10 +75,27 @@ void gh3026_i2c_write(uint8_t device_id, const uint8_t write_buffer[], uint16_t 
   pbl_i2c_write(HRM->i2c, write_buffer, length);
 }
 
+// FIFO drains are a few hundred bytes. Read them through a DMA-safe buffer so a bus with DMA can
+// let the CPU sleep through the transfer instead of taking an interrupt per byte. The library
+// reads at most its raw data buffer at once, and only ever from one task at a time.
+static uint8_t s_dma_buf[DCACHE_ROUND_UP(__GH3X2X_RAWDATA_BUFFER_SIZE__)]
+    PBL_ALIGNED(DCACHE_LINE_SIZE_MAX);
+
 void gh3026_i2c_read(uint8_t device_id, const uint8_t write_buffer[], uint16_t write_length,
                      uint8_t read_buffer[], uint16_t read_length) {
   pbl_i2c_write(HRM->i2c, write_buffer, write_length);
-  pbl_i2c_read(HRM->i2c, read_buffer, read_length);
+  if (read_length <= sizeof(s_dma_buf)) {
+    struct pbl_i2c_msg msg = {
+      .buf = s_dma_buf,
+      .len = read_length,
+      .flags = PBL_I2C_MSG_READ | PBL_I2C_MSG_DMA_SAFE,
+    };
+    if (pbl_i2c_transfer(HRM->i2c, &msg, 1U) == 0) {
+      memcpy(read_buffer, s_dma_buf, read_length);
+    }
+  } else {
+    pbl_i2c_read(HRM->i2c, read_buffer, read_length);
+  }
 }
 
 static void prv_conv_fs4g_mg_to_lsb512(AccelRawData *data) {
