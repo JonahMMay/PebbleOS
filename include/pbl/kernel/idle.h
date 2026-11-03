@@ -31,8 +31,8 @@
 /**
  * @brief Idle the CPU.
  *
- * Implemented by the SoC. Runs on the idle thread when nothing is runnable, only for gaps of at
- * least two ticks; may sleep. Once interrupts are masked it must check pbl_idle_confirm() before
+ * Implemented by the SoC. Runs on the idle thread when nothing is runnable, for gaps of at least
+ * one tick; may sleep. Once interrupts are masked it must check pbl_idle_confirm() before
  * sleeping, and report through pbl_idle_slept() any ticks that passed while the tick interrupt
  * was off.
  *
