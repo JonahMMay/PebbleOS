@@ -31,8 +31,15 @@ extern const ReceiverImplementation g_app_message_receiver_implementation;
 //! AppMessageHeader of the incoming push:
 #define MAX_HEADER_SIZE (sizeof(AppMessageHeader))
 
+//! Messages above this size, in bytes, switch the connection to its fastest response time while
+//! they arrive. Smaller ones fit in a few packets, which the relaxed connection carries promptly.
+#define FAST_CONNECTION_MIN_PAYLOAD_SIZE 500
+
 typedef struct {
   bool is_writing_to_app_inbox;
+
+  //! The message is large enough to keep the connection fast while it arrives.
+  bool wants_fast_connection;
 
   CommSession *session;
 
@@ -73,7 +80,8 @@ static void prv_write(const uint8_t *data, size_t length) {
 static Receiver *prv_app_message_receiver_prepare(CommSession *session,
                                                   const PebbleProtocolEndpoint *endpoint,
                                                   size_t total_payload_size) {
-  if (total_payload_size > 500) {
+  const bool wants_fast_connection = (total_payload_size > FAST_CONNECTION_MIN_PAYLOAD_SIZE);
+  if (wants_fast_connection) {
     comm_session_set_responsiveness(session, PBL_BT_CONSUMER_PP_APP_MESSAGE,
                                     PBL_BT_RESPONSE_TIME_MIN,
                                     PBL_BT_MIN_LATENCY_MODE_TIMEOUT_APP_MESSAGE_SECS);
@@ -84,6 +92,7 @@ static Receiver *prv_app_message_receiver_prepare(CommSession *session,
     return nullptr;
   }
   rcv->session = session;
+  rcv->wants_fast_connection = wants_fast_connection;
 
   const size_t header_bytes_remaining = MIN(MAX_HEADER_SIZE, total_payload_size);
   rcv->header_bytes_remaining = header_bytes_remaining;
@@ -121,9 +130,11 @@ static Receiver *prv_app_message_receiver_prepare(CommSession *session,
 static void prv_app_message_receiver_write(Receiver *receiver, const uint8_t *data, size_t length) {
   AppMessageReceiver *rcv = (AppMessageReceiver *)receiver;
 
-  comm_session_set_responsiveness(rcv->session, PBL_BT_CONSUMER_PP_APP_MESSAGE,
-                                  PBL_BT_RESPONSE_TIME_MIN,
-                                  PBL_BT_MIN_LATENCY_MODE_TIMEOUT_APP_MESSAGE_SECS);
+  if (rcv->wants_fast_connection) {
+    comm_session_set_responsiveness(rcv->session, PBL_BT_CONSUMER_PP_APP_MESSAGE,
+                                    PBL_BT_RESPONSE_TIME_MIN,
+                                    PBL_BT_MIN_LATENCY_MODE_TIMEOUT_APP_MESSAGE_SECS);
+  }
 
   if (rcv->header_bytes_remaining > 0) {
     const size_t header_bytes_to_write = MIN(rcv->header_bytes_remaining, length);
