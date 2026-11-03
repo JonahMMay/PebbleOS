@@ -10,6 +10,7 @@
 #include <kernel/events.h>
 #include <kernel/kernel_applib_state.h>
 #include <kernel/pebble_tasks.h>
+#include <kernel/task_timer_manager.h>
 #include <process_management/process_manager.h>
 #include <process_state/app_state/app_state.h>
 
@@ -40,8 +41,26 @@ void animation_service_cleanup(PebbleTask task) {
 }
 
 // ------------------------------------------------------------------------------------------
+//! Count the animation due next, by its implementation and stopped handler, to tell which one
+//! keeps the timer running.
+static void prv_record_next_animation(const AnimationState *state) {
+  if (state == nullptr || state->signature != ANIMATION_STATE_3_X_SIGNATURE) {
+    return;
+  }
+  const AnimationPrivate *animation = (const AnimationPrivate *)state->scheduled_head;
+  if (animation == nullptr) {
+    return;
+  }
+  task_timer_cb_stats_record((void *)animation->implementation);
+  task_timer_cb_stats_record((void *)animation->handlers.stopped);
+}
+
+// ------------------------------------------------------------------------------------------
 static void prv_timer_callback(void *context) {
   PebbleTask task = (PebbleTask)(uintptr_t)context;
+
+  prv_record_next_animation((task == PebbleTask_KernelMain) ? kernel_applib_get_animation_state()
+                                                            : app_state_get_animation_state());
 
   PebbleEvent e = {
     .type = PEBBLE_CALLBACK_EVENT,

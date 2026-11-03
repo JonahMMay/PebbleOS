@@ -3,10 +3,13 @@
 
 #include "task_timer.h"
 
+#include <string.h>
+
 #include "task_timer_manager.h"
 
 #include <pbl/drivers/rtc.h>
 #include <pbl/kernel/assert.h>
+#include <pbl/kernel/irq.h>
 #include <pbl/kernel/mutex.h>
 #include <pbl/kernel/sem.h>
 #include <pbl/kernel/types.h>
@@ -298,6 +301,28 @@ void task_timer_manager_init(TaskTimerManager *manager, struct pbl_sem *semaphor
   static_assert(NumPebbleTask < 16, "Too many tasks");
 }
 
+static TaskTimerCbStat s_cb_stats[TASK_TIMER_CB_STATS];
+
+void task_timer_cb_stats_record(void *cb) {
+  pbl_irq_lock();
+  size_t i = 0;
+  while (i < TASK_TIMER_CB_STATS - 1 && s_cb_stats[i].cb != cb && s_cb_stats[i].cb != nullptr) {
+    i++;
+  }
+  if (i == TASK_TIMER_CB_STATS - 1 && s_cb_stats[i].cb != cb) {
+    cb = nullptr;
+  }
+  s_cb_stats[i].cb = cb;
+  s_cb_stats[i].count++;
+  pbl_irq_unlock();
+}
+
+void task_timer_cb_stats_get(TaskTimerCbStat stats[TASK_TIMER_CB_STATS]) {
+  pbl_irq_lock();
+  memcpy(stats, s_cb_stats, sizeof(s_cb_stats));
+  pbl_irq_unlock();
+}
+
 pbl_tick_t task_timer_manager_execute_expired_timers(TaskTimerManager *manager) {
   while (1) {
     pbl_tick_t ticks_to_wait = 0;
@@ -347,6 +372,7 @@ pbl_tick_t task_timer_manager_execute_expired_timers(TaskTimerManager *manager) 
 
     // Run the timer callback now
     manager->current_cb = next_timer->cb_data;
+    task_timer_cb_stats_record((void *)next_timer->cb);
     next_timer->cb(next_timer->cb_data);
     manager->current_cb = nullptr;
 

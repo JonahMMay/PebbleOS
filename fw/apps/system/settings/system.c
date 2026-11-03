@@ -7,6 +7,7 @@
 #include "factory_reset.h"
 #include "menu.h"
 #include "option_menu.h"
+#include "power_stats.h"
 #include "window.h"
 
 #include <errno.h>
@@ -76,6 +77,9 @@ enum {
   DebuggingItemCompactSettingsDbs,
 #if defined(CONFIG_HRM) && defined(CONFIG_DEMO_APP_SPO2_TEST)
   DebuggingItemSpO2Test,
+#endif
+#ifdef CONFIG_SOC_SF32LB52
+  DebuggingItemPowerStats,
 #endif
   DebuggingItem_Count,
 };
@@ -503,6 +507,9 @@ static const char *s_debugging_titles[DebuggingItem_Count] = {
 #if defined(CONFIG_HRM) && defined(CONFIG_DEMO_APP_SPO2_TEST)
   [DebuggingItemSpO2Test] = i18n_noop("SpO2 Test"),
 #endif
+#ifdef CONFIG_SOC_SF32LB52
+  [DebuggingItemPowerStats] = i18n_noop("Power Stats"),
+#endif
 };
 
 static void prv_debugging_draw_row_callback(GContext *ctx, const Layer *cell_layer,
@@ -593,6 +600,11 @@ static void prv_debugging_select_callback(MenuLayer *menu_layer, MenuIndex *cell
         .id = APP_ID_SPO2_TEST,
         .common.reason = APP_LAUNCH_USER,
       });
+      break;
+#endif
+#ifdef CONFIG_SOC_SF32LB52
+    case DebuggingItemPowerStats:
+      power_stats_window_push();
       break;
 #endif
     default:

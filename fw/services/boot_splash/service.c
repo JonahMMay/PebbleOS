@@ -14,6 +14,7 @@
 #include <pbl/util/math.h>
 
 #include <board/splash.h>
+#include <system/boot_timing.h>
 
 enum splash_color {
   SPLASH_COLOR_WHITE,
@@ -155,6 +156,7 @@ static void prv_boot_splash_task(void *param) {
     prv_draw_logo(fb);
     prv_draw_progress_bar(fb, progress_cx, progress_cy, frame);
     prv_show(fb);
+    boot_timing_mark(BootTimingSplashShown);
 
     frame++;
 

@@ -37,6 +37,9 @@ const char *pebble_task_get_name(PebbleTask task) {
   return "App <Stub>";
 }
 
+void task_timer_cb_stats_record(void *cb) {
+}
+
 static PebbleEvent s_last_event;
 
 bool process_manager_send_event_to_process(PebbleTask task, PebbleEvent *e) {
